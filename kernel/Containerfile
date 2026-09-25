@@ -1,0 +1,10 @@
+# Kernel builder. Ubuntu 22.04 matches the toolchain Apple's default kernel
+# was built with (gcc 11.4, pahole 1.25; see CONFIG_CC_VERSION_TEXT and
+# CONFIG_PAHOLE_VERSION in base-arm64.config), so olddefconfig is stable.
+FROM docker.io/library/ubuntu:22.04@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      bc bison ca-certificates curl dwarves flex gcc libc6-dev libelf-dev \
+      libssl-dev make python3 xz-utils \
+ && rm -rf /var/lib/apt/lists/*
