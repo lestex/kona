@@ -1,0 +1,36 @@
+-- before (10:02:46)
+bridge100 bridge101 bridge102 
+host -> gpu0 192.168.65.10: ok
+host -> cpu1 static 192.168.66.200: ok
+gpu0 -> cpu1 over wg: ok
+cpu1 -> gpu0 over wg: ok
+cpu1 handshake: 83s ago
+cpu1 -> internet: ok
+== Wi-Fi off
+-- Wi-Fi off (10:02:54)
+bridge100 bridge101 bridge102 
+host -> gpu0 192.168.65.10: ok
+host -> cpu1 static 192.168.66.200: ok
+gpu0 -> cpu1 over wg: ok
+cpu1 -> gpu0 over wg: ok
+cpu1 handshake: 91s ago
+cpu1 -> internet: FAIL
+== Wi-Fi on
+-- Wi-Fi back (10:03:02)
+bridge100 bridge101 bridge102 
+host -> gpu0 192.168.65.10: ok
+host -> cpu1 static 192.168.66.200: ok
+gpu0 -> cpu1 over wg: ok
+cpu1 -> gpu0 over wg: ok
+cpu1 handshake: 100s ago
+cpu1 -> internet: ok
+== waiting for gpu0 -> cpu1 over wg to recover
+recovered 3s after Wi-Fi came back
+-- recovered (10:03:05)
+bridge100 bridge101 bridge102 
+host -> gpu0 192.168.65.10: ok
+host -> cpu1 static 192.168.66.200: ok
+gpu0 -> cpu1 over wg: ok
+cpu1 -> gpu0 over wg: ok
+cpu1 handshake: 102s ago
+cpu1 -> internet: ok

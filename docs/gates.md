@@ -277,4 +277,82 @@ iperf Done.
 iperf Done.
 ```
 
-Sleep/wake and Wi-Fi change: **not run yet** (these need user consent; see [networking.md](networking.md#open-items-need-user-action-before-phase-1)).
+Wi-Fi change (`spikes/03-net/wifi-toggle.sh`), run 1:
+
+```text
+-- before (10:00:54)
+bridge100 bridge101 bridge102 
+host -> gpu0 192.168.65.10: ok
+host -> cpu1 static 192.168.66.200: ok
+gpu0 -> cpu1 over wg: ok
+cpu1 -> gpu0 over wg: ok
+cpu1 handshake: 
+cpu1 -> internet: ok
+== Wi-Fi off
+-- Wi-Fi off (10:01:02)
+bridge100 bridge101 bridge102 
+host -> gpu0 192.168.65.10: ok
+host -> cpu1 static 192.168.66.200: ok
+gpu0 -> cpu1 over wg: ok
+cpu1 -> gpu0 over wg: ok
+cpu1 handshake: 
+cpu1 -> internet: FAIL
+== Wi-Fi on
+-- Wi-Fi back (10:01:16)
+bridge100 bridge101 bridge102 
+host -> gpu0 192.168.65.10: ok
+host -> cpu1 static 192.168.66.200: ok
+gpu0 -> cpu1 over wg: FAIL
+cpu1 -> gpu0 over wg: FAIL
+cpu1 handshake: 
+cpu1 -> internet: ok
+# (run 1 used an earlier script revision: no recovery timer, and the
+#  handshake field was empty because busybox awk lacks systime().)
+# Manual recheck ~40s later:
+after +40s: gpu0->cpu1 ok
+cpu1 handshake age: 68s
+```
+
+Run 2 (with recovery timer):
+
+```text
+-- before (10:02:46)
+bridge100 bridge101 bridge102 
+host -> gpu0 192.168.65.10: ok
+host -> cpu1 static 192.168.66.200: ok
+gpu0 -> cpu1 over wg: ok
+cpu1 -> gpu0 over wg: ok
+cpu1 handshake: 83s ago
+cpu1 -> internet: ok
+== Wi-Fi off
+-- Wi-Fi off (10:02:54)
+bridge100 bridge101 bridge102 
+host -> gpu0 192.168.65.10: ok
+host -> cpu1 static 192.168.66.200: ok
+gpu0 -> cpu1 over wg: ok
+cpu1 -> gpu0 over wg: ok
+cpu1 handshake: 91s ago
+cpu1 -> internet: FAIL
+== Wi-Fi on
+-- Wi-Fi back (10:03:02)
+bridge100 bridge101 bridge102 
+host -> gpu0 192.168.65.10: ok
+host -> cpu1 static 192.168.66.200: ok
+gpu0 -> cpu1 over wg: ok
+cpu1 -> gpu0 over wg: ok
+cpu1 handshake: 100s ago
+cpu1 -> internet: ok
+== waiting for gpu0 -> cpu1 over wg to recover
+recovered 3s after Wi-Fi came back
+-- recovered (10:03:05)
+bridge100 bridge101 bridge102 
+host -> gpu0 192.168.65.10: ok
+host -> cpu1 static 192.168.66.200: ok
+gpu0 -> cpu1 over wg: ok
+cpu1 -> gpu0 over wg: ok
+cpu1 handshake: 102s ago
+cpu1 -> internet: ok
+```
+
+Sleep/wake: **not run yet** (deferred by the user; see [networking.md](networking.md#open-items-need-user-action-before-phase-1)).
+

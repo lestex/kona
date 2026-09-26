@@ -119,11 +119,29 @@ flowchart LR
    `sudo pfctl -sA` and `sudo pfctl -a com.apple -sA`, then `-sr` on each
    anchor, which shows whether the isolation is a pf rule that a `pass quick`
    anchor can override.
-2. **Sleep/wake and Wi-Fi change.** These are disruptive to the machine, so
-   they are run only with explicit consent: `pmset sleepnow` with the mesh up,
-   then wake, and check handshake age, ping, and `chronyc tracking` skew. Then
-   toggle Wi-Fi (`networksetup -setairportpower en0 off/on`) and check that
-   the vmnet bridges, static IPs, and published ports survive. Expected
-   behavior: vmnet bridges are host-local and don't depend on Wi-Fi, WireGuard
-   re-handshakes within one keepalive interval, and guest clocks drift during
-   sleep until chrony steps them. These expectations are **not yet verified**.
+2. **Sleep/wake is not tested yet** (deferred by the user). Plan: run
+   `pmset sleepnow` with the mesh up, then wake, and check handshake age, ping,
+   and `chronyc tracking` skew. The expectation, which is **not verified**, is
+   that guest clocks fall behind by the sleep duration until chrony steps them.
+
+## Wi-Fi change behavior (verified)
+
+`spikes/03-net/wifi-toggle.sh` ran twice with the mesh up. It turns Wi-Fi off
+for ~8 s, then back on. Outputs are in `wifi-toggle-run1.txt` and
+`wifi-toggle-run2.txt`.
+
+| Path | Wi-Fi off | Wi-Fi back |
+|------|-----------|------------|
+| vmnet bridges (`bridge100-102`) | kept | kept |
+| host → node static IPs | ok | ok |
+| CPU↔CPU / GPU↔GPU (direct L2) | ok | ok |
+| GPU↔CPU over WireGuard (published-port proxy) | ok | **run 1: broken, healed within ~40 s without a re-handshake; run 2: no outage (≤3 s)** |
+| node → internet (vmnet NAT) | fails, as expected | ok |
+
+vmnet networks are host-local and don't depend on the uplink, so Wi-Fi changes
+never touch intra-cluster L2 paths. The GPU↔CPU path goes through
+`container`'s userspace UDP proxy and can stall briefly when the host's
+primary interface changes. `PersistentKeepalive=25` re-establishes the flow.
+kona's node agent treats a handshake older than 3 × keepalive as degraded and
+bounces the peer endpoint (`wg set ... endpoint`) to force a new flow.
+`kona get nodes` surfaces it.
