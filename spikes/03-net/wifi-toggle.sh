@@ -11,7 +11,7 @@ check() {
   echo "-- $1 ($(date +%T))"
   ifconfig | grep -E '^bridge10[0-9]' | cut -d: -f1 | tr '\n' ' '; echo
   echo "host -> gpu0 $GPU_IP: $(ping -c1 -t2 "$GPU_IP" >/dev/null && echo ok || echo FAIL)"
-  echo "host -> cpu1 static 192.168.66.200: $(ping -c1 -t2 192.168.66.200 >/dev/null && echo ok || echo FAIL)"
+  echo "host -> cpu1 static $CPU_STATIC: $(ping -c1 -t2 "$CPU_STATIC" >/dev/null && echo ok || echo FAIL)"
   echo "gpu0 -> cpu1 over wg: $(vmssh 'ping -c2 -W2 10.99.0.21 >/dev/null' && echo ok || echo FAIL)"
   echo "cpu1 -> gpu0 over wg: $(cexec ping -c2 -W2 10.99.0.10 >/dev/null && echo ok || echo FAIL)"
   echo "cpu1 handshake: $(echo $(( $(date +%s) - $(cexec wg show wg0 latest-handshakes | awk '{print $2}') ))s ago)"

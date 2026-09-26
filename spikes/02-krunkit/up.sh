@@ -93,7 +93,8 @@ krunkit --cpus 4 --memory 4096 \
 ssh_opts=(-i "$work/id_ed25519" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=3 -o LogLevel=ERROR)
 for _ in $(seq 120); do
   if ssh "${ssh_opts[@]}" kona@"$ip" true 2>/dev/null; then
-    echo "$name up at $ip"
+    echo "$name up at $ip, waiting for cloud-init (packages + patched Mesa)"
+    ssh "${ssh_opts[@]}" kona@"$ip" 'cloud-init status --wait >/dev/null; cloud-init status; rpm -q mesa-vulkan-drivers'
     exit 0
   fi
   sleep 2
