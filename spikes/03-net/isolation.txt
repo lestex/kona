@@ -1,0 +1,21 @@
+## host: forwarding + routes
+net.inet.ip.forwarding: 1
+192.168.64         link#32            UC              bridge100      !
+192.168.65         link#35            UC              bridge101      !
+192.168.66         link#37            UC              bridge102      !
+## (a) vmnet-helper on the container network's subnet (192.168.66.0/24)
+ERROR [main] vmnet_start_interface: (unknown status)
+## (b) container (192.168.66.4, bridge102) -> krunkit (192.168.65.10, bridge101) via host
+2 packets transmitted, 0 received, 100% packet loss, time 1031ms
+
+## krunkit -> container
+2 packets transmitted, 0 received, 100% packet loss, time 1021ms
+
+## where the packets stop: tcpdump on both host bridges while the container pings
+[bridge102 ingress] 09:57:25.379505 IP 192.168.66.4 > 192.168.65.10: ICMP echo request, id 40, seq 1, length 64
+[bridge102 ingress] 09:57:26.411848 IP 192.168.66.4 > 192.168.65.10: ICMP echo request, id 40, seq 2, length 64
+[bridge101 egress ] 
+(nothing on bridge101 => not forwarded)
+## two container networks are isolated too: buildkit (default net) -> 192.168.66.4
+--- 192.168.66.4 ping statistics ---
+2 packets transmitted, 0 packets received, 100% packet loss

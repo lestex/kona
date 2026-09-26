@@ -1,0 +1,19 @@
+## underlay MTU
+cpu1 eth0: 1280  gpu0 eth0: 1500  wg0: 1420
+## source IP as seen by the receiver (tcpdump on wg0)
+13:51:49.401554 IP 10.99.0.21 > 10.99.0.10: ICMP echo request, id 25, seq 0, length 64
+13:51:51.477619 IP 10.99.0.10 > 10.99.0.21: ICMP echo request, id 59226, seq 1, length 64
+## largest unfragmented ICMP payload over wg0 (DF set)
+payload 1392 dropped
+payload 1352 dropped
+payload 1300 ok (packet 1328)
+## iperf3 gpu0 -> cpu1 over wg (10s)
+[  5]   0.00-10.00  sec   440 MBytes   369 Mbits/sec   29            sender
+[  5]   0.00-10.01  sec   439 MBytes   368 Mbits/sec                  receiver
+
+iperf Done.
+## iperf3 cpu1 -> gpu0 over wg (10s, reverse)
+[  5]   0.00-10.00  sec   435 MBytes   365 Mbits/sec    0            sender
+[  5]   0.00-10.00  sec   434 MBytes   364 Mbits/sec                  receiver
+
+iperf Done.
