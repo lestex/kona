@@ -65,12 +65,14 @@ These are places where observed behavior differs from the brief. Each one is fla
 
 | Component | Pinned | Why |
 |-----------|--------|-----|
-| Kubernetes | v1.34.12 | The brief targets 1.34.x (`resource.k8s.io/v1` is GA). The newest is v1.37.1. `--k8s-version` can override it. |
-| k3s | v1.34.11+k3s1 | The newest k3s on the 1.34 line. |
+| Kubernetes | v1.37.1 | Newest release (moved from the brief's 1.34.x on 2026-09-27 at the user's request; DRA `resource.k8s.io/v1` is GA since 1.34). kubeadm path. `--k8s-version` selects another node image. |
+| k3s | v1.37.0+k3s1 | Newest k3s on the 1.37 line; k3s has not shipped 1.37.1 yet, so the default (k3s) path is one patch behind kubeadm. Bundles containerd 2.3.4. |
+| crictl | v1.37.0 | kubeadm image. |
+| pause (sandbox) | 3.10.2 | Pinned in the kubeadm image's containerd config; must match `kubeadm config images list`. |
 | containerd | v2.4.1 | kubeadm path. CDI is enabled by default in containerd 2.x. |
 | runc | v1.5.1 | |
 | CNI plugins | v1.9.1 | |
-| etcd | v3.6.15 | kubeadm path (`etcdctl check perf`). |
+| etcd | v3.7.2 (etcdctl) | kubeadm 1.37 runs etcd 3.7.0 as a static pod; the image ships the matching 3.7 etcdctl for `check perf`. |
 | Cilium / cilium-cli | v1.20.2 / v0.20.1 | |
 | Sonobuoy | v0.57.5 | Gate runs. |
 | Linux kernel | 6.18.35 | Matches Apple's default kernel exactly, so the kona config diff is minimal. |

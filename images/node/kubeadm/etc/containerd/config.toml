@@ -15,7 +15,7 @@ version = 3
   BinaryName = '/usr/local/sbin/runc'
 
 [plugins.'io.containerd.cri.v1.images'.pinned_images]
-  sandbox = 'registry.k8s.io/pause:3.10.1'
+  sandbox = 'registry.k8s.io/pause:3.10.2'  # must match `kubeadm config images list` for KUBERNETES_VERSION
 
 # Registry mirrors (kona-registry, Phase 4) are dropped in as hosts.toml files.
 [plugins.'io.containerd.cri.v1.images'.registry]
