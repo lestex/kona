@@ -20,7 +20,7 @@ func newGetCmd(g *globals) *cobra.Command {
 }
 
 func (g *globals) manager(cmd *cobra.Command) *cluster.Manager {
-	return cluster.NewManager(g.store, container.New(execx.OS{}), cmd.ErrOrStderr())
+	return cluster.NewManager(g.store, container.New(execx.OS{}), execx.OS{}, cmd.ErrOrStderr())
 }
 
 func newGetClustersCmd(g *globals) *cobra.Command {

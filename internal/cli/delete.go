@@ -24,7 +24,7 @@ func newDeleteClusterCmd(g *globals) *cobra.Command {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			m := cluster.NewManager(g.store, container.New(execx.OS{}), cmd.ErrOrStderr())
+			m := cluster.NewManager(g.store, container.New(execx.OS{}), execx.OS{}, cmd.ErrOrStderr())
 			var names []string
 			switch {
 			case all && len(args) > 0:
