@@ -616,6 +616,20 @@ func cniName(s string) string {
 	return s
 }
 
+// ciliumRunner isolates the Cilium CLI's embedded Helm from the user's own
+// Helm setup (~/Library/Preferences/helm, repo caches): kona must neither
+// depend on nor modify it.
+func (m *Manager) ciliumRunner() execx.Runner {
+	h := filepath.Join(m.Store.Root, "helm")
+	return execx.WithEnv(m.Host,
+		"HELM_CONFIG_HOME="+filepath.Join(h, "config"),
+		"HELM_CACHE_HOME="+filepath.Join(h, "cache"),
+		"HELM_DATA_HOME="+filepath.Join(h, "data"),
+		"HELM_REPOSITORY_CONFIG="+filepath.Join(h, "config", "repositories.yaml"),
+		"HELM_REPOSITORY_CACHE="+filepath.Join(h, "cache", "repository"),
+	)
+}
+
 func (m *Manager) installCilium(ctx context.Context, d distro.Distro, c *state.Cluster) error {
 	cp := c.ControlPlanes()[0].Name
 	if _, err := m.Container.Exec(ctx, cp, d.Kubectl("-n", "kube-system", "get", "daemonset", "cilium")...); err == nil {
@@ -631,7 +645,7 @@ func (m *Manager) installCilium(ctx context.Context, d distro.Distro, c *state.C
 		return fmt.Errorf("cilium CLI: %w", err)
 	}
 	m.logf("• Installing Cilium %s (kube-proxy replacement, VXLAN, Hubble)", cni.CiliumVersion())
-	if _, err := m.Host.Run(ctx, cli, cni.CiliumInstallArgs(c, kc, kubeconfig.ContextName(c.Name))...); err != nil {
+	if _, err := m.ciliumRunner().Run(ctx, cli, cni.CiliumInstallArgs(c, kc, kubeconfig.ContextName(c.Name))...); err != nil {
 		return fmt.Errorf("cilium install: %w", err)
 	}
 	return nil
@@ -651,7 +665,7 @@ func (m *Manager) waitCilium(ctx context.Context, c *state.Cluster, deadline tim
 		left = 10 * time.Second
 	}
 	m.logf("• Waiting up to %s for Cilium to be healthy", left)
-	if _, err := m.Host.Run(ctx, cli, cni.CiliumStatusArgs(kc, kubeconfig.ContextName(c.Name), left.String())...); err != nil {
+	if _, err := m.ciliumRunner().Run(ctx, cli, cni.CiliumStatusArgs(kc, kubeconfig.ContextName(c.Name), left.String())...); err != nil {
 		return fmt.Errorf("cilium status: %s", lastLine(err))
 	}
 	m.logf("✓ Cilium is healthy")
