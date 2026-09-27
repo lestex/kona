@@ -21,11 +21,11 @@ func cluster(cps int) *state.Cluster {
 func args(t *testing.T, c *state.Cluster, name string) string {
 	t.Helper()
 	n, _ := c.Node(name)
-	a, err := K3s{}.NodeArgs(c, n, "tok")
+	spec, err := K3s{}.NodeSpec(c, n, map[string]string{SecretToken: "tok"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return strings.Join(a, " ")
+	return strings.Join(spec.Args, " ")
 }
 
 func TestSingleServerUsesSQLite(t *testing.T) {
@@ -57,9 +57,14 @@ func TestAgent(t *testing.T) {
 }
 
 func TestTokenOnlyInEnv(t *testing.T) {
-	env := K3s{}.NodeEnv(nil, state.Node{}, "tok")
-	if env["K3S_TOKEN"] != "tok" {
-		t.Fatalf("env = %v", env)
+	c := cluster(1)
+	spec, _ := K3s{}.NodeSpec(c, c.Nodes[0], map[string]string{SecretToken: "tok"})
+	if spec.Env["K3S_TOKEN"] != "tok" || !spec.UseInit || spec.DataDir != DataDir {
+		t.Fatalf("spec = %+v", spec)
+	}
+	s, err := K3s{}.NewSecrets()
+	if err != nil || len(s[SecretToken]) != 64 {
+		t.Fatalf("NewSecrets = %v, %v", s, err)
 	}
 	if !slices.Equal(K3s{}.Kubectl("get", "nodes"), []string{"kubectl", "--kubeconfig", AdminKubeconfigPath, "get", "nodes"}) {
 		t.Fatal("Kubectl args")
