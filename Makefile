@@ -1,8 +1,9 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 MATRIX  := $(shell grep -E '^[A-Z0-9_]+=' versions.env | grep -vE '_(SHA256[A-Z0-9_]*|DIGEST)=' | paste -sd, -)
+SUMS    := $(shell grep -E '^[A-Z0-9_]+_SHA256[A-Z0-9_]*=' versions.env | paste -sd, -)
 PKG     := github.com/lestex/kona/internal/version
-LDFLAGS := -s -w -X $(PKG).Version=$(VERSION) -X $(PKG).Commit=$(COMMIT) -X '$(PKG).matrix=$(MATRIX)'
+LDFLAGS := -s -w -X $(PKG).Version=$(VERSION) -X $(PKG).Commit=$(COMMIT) -X '$(PKG).matrix=$(MATRIX)' -X '$(PKG).checksums=$(SUMS)'
 
 .PHONY: build test lint clean
 
