@@ -270,3 +270,45 @@ func TestParseSize(t *testing.T) {
 		}
 	}
 }
+
+func TestListFlagsOrphansAndDegraded(t *testing.T) {
+	m, s, _, o := setup(t)
+	if err := m.Create(context.Background(), o); err != nil {
+		t.Fatal(err)
+	}
+	// A VM from a crashed create of another cluster, and a missing node here.
+	s.containers["ghost-worker-1"] = map[string]string{container.LabelCluster: "ghost"}
+	delete(s.containers, "kona-worker-2")
+	infos, err := m.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 2 {
+		t.Fatalf("infos: %+v", infos)
+	}
+	ghost, kona := infos[0], infos[1]
+	if ghost.Name != "ghost" || ghost.Status != StatusOrphan || ghost.Nodes != 1 {
+		t.Fatalf("ghost: %+v", ghost)
+	}
+	if kona.Status != StatusDegraded || kona.Running != 2 || kona.Issues[0] != "kona-worker-2 missing" {
+		t.Fatalf("kona: %+v", kona)
+	}
+	// delete --all path: Delete works from labels for orphans too.
+	if err := m.Delete(context.Background(), "ghost"); err != nil || s.containers["ghost-worker-1"] != nil {
+		t.Fatalf("delete orphan: %v", err)
+	}
+}
+
+func TestNodesReportsReadiness(t *testing.T) {
+	m, _, _, o := setup(t)
+	if err := m.Create(context.Background(), o); err != nil {
+		t.Fatal(err)
+	}
+	ns, err := m.Nodes(context.Background(), "kona")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ns) != 3 || ns[0].Ready != "true" || ns[0].VM != "running" || ns[2].IP != "192.168.70.21" {
+		t.Fatalf("nodes: %+v", ns)
+	}
+}

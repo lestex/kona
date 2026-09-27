@@ -413,7 +413,7 @@ func (m *Manager) waitAPI(ctx context.Context, d distro.Distro, c *state.Cluster
 			return err
 		}
 	}
-	return fmt.Errorf("API server on %s not ready before --wait expired: %v (see `container logs %s`)", cp, last, cp)
+	return fmt.Errorf("API server on %s not ready before --wait expired: %s (see `container logs %s`)", cp, lastLine(last), cp)
 }
 
 // NodeStatus is one node's Kubernetes view.
@@ -554,6 +554,16 @@ func (m *Manager) Delete(ctx context.Context, name string) error {
 		return err
 	}
 	return m.Store.Delete(name)
+}
+
+// lastLine returns the last non-empty line of err: tools like k3s print
+// progress logs before the actual error.
+func lastLine(err error) string {
+	if err == nil {
+		return "no response"
+	}
+	lines := strings.Split(strings.TrimSpace(err.Error()), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
 }
 
 func nodeNames(ns []state.Node) []string {
