@@ -53,7 +53,7 @@ func newCreateClusterCmd(g *globals) *cobra.Command {
 				o.Image = cluster.DefaultImage(o.Distro, o.K8sVersion)
 			}
 			o.HostMemory = hostMemory(ctx, run)
-			m := cluster.NewManager(g.store, container.New(run), cmd.ErrOrStderr())
+			m := cluster.NewManager(g.store, container.New(run), run, cmd.ErrOrStderr())
 			return m.Create(ctx, o)
 		},
 	}

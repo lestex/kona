@@ -13,9 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lestex/kona/internal/distro"
 	"github.com/lestex/kona/internal/execx"
 	"github.com/lestex/kona/internal/runtime/container"
 	"github.com/lestex/kona/internal/state"
+	"github.com/lestex/kona/internal/tools"
 )
 
 const adminKubeconfig = `apiVersion: v1
@@ -33,6 +35,7 @@ type sim struct {
 	containers map[string]map[string]string // name -> labels
 	failRun    string                       // container name whose run fails
 	notReady   bool
+	cilium     bool // cilium DaemonSet exists
 }
 
 func newSim() *sim {
@@ -126,6 +129,11 @@ func (s *sim) runner() *execx.Fake {
 				return ok(`{"items":[` + strings.Join(items, ",") + `]}`)
 			case strings.HasPrefix(cmd, "cat "):
 				return ok(adminKubeconfig)
+			case strings.HasSuffix(cmd, "get daemonset cilium"):
+				if !s.cilium {
+					return notFound()
+				}
+				return ok("")
 			}
 		}
 		return ok("")
@@ -150,8 +158,12 @@ func setup(t *testing.T) (*Manager, *sim, *bytes.Buffer, CreateOptions) {
 	s := newSim()
 	var log bytes.Buffer
 	now := time.Unix(0, 0)
+	host := &execx.Fake{}
+	cache := &tools.Cache{Dir: t.TempDir()}
+	os.WriteFile(cache.Path(tools.CiliumCLI()), []byte("#!/bin/sh"), 0o755) // pre-cached CLI
 	m := &Manager{
 		Store: &state.Store{Root: t.TempDir()}, Container: container.New(s.runner()), Log: &log,
+		Host: host, Tools: cache,
 		HostPrefixes: func() []netip.Prefix { return []netip.Prefix{netip.MustParsePrefix("192.168.1.0/24")} },
 		Now:          func() time.Time { return now },
 		Sleep: func(context.Context, time.Duration) error {
@@ -249,7 +261,7 @@ func TestValidate(t *testing.T) {
 	bad := []func(*CreateOptions){
 		func(o *CreateOptions) { o.ControlPlanes = 2 },
 		func(o *CreateOptions) { o.GPUWorkers = 1 },
-		func(o *CreateOptions) { o.CNI = "cilium" },
+		func(o *CreateOptions) { o.CNI = "calico" },
 		func(o *CreateOptions) { o.Memory = "lots" },
 		func(o *CreateOptions) { o.Kernel = "/nope" },
 		func(o *CreateOptions) { o.Name = "Bad" },
@@ -312,4 +324,41 @@ func TestNodesReportsReadiness(t *testing.T) {
 	if len(ns) != 3 || ns[0].Ready != "true" || ns[0].VM != "running" || ns[2].IP != "192.168.70.21" {
 		t.Fatalf("nodes: %+v", ns)
 	}
+}
+
+func TestCreateWithCilium(t *testing.T) {
+	m, s, log, o := setup(t)
+	o.CNI = "cilium"
+	if err := m.Create(context.Background(), o); err != nil {
+		t.Fatalf("Create: %v\n%s", err, log)
+	}
+	host := m.Host.(*execx.Fake)
+	if len(host.Calls) != 2 || !strings.Contains(host.Calls[0], " install ") || !strings.Contains(host.Calls[1], " status ") {
+		t.Fatalf("host calls: %q", host.Calls)
+	}
+	if c, _ := m.Store.Load("kona"); c.CNI != "cilium" {
+		t.Fatalf("CNI in state = %q", c.CNI)
+	}
+	// Resume/idempotency: an existing DaemonSet skips the install.
+	s.cilium = true
+	host.Calls = nil
+	if err := m.installCilium(context.Background(), mustDistro(t, "k3s"), mustLoad(t, m, "kona")); err != nil || len(host.Calls) != 0 {
+		t.Fatalf("second install: %v %q", err, host.Calls)
+	}
+}
+
+func mustDistro(t *testing.T, name string) distro.Distro {
+	d, err := DistroFor(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+func mustLoad(t *testing.T, m *Manager, name string) *state.Cluster {
+	c, err := m.Store.Load(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
 }

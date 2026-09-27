@@ -9,17 +9,21 @@ import (
 	"io"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/lestex/kona/internal/cni"
 	"github.com/lestex/kona/internal/distro"
 	"github.com/lestex/kona/internal/distro/k3s"
 	"github.com/lestex/kona/internal/distro/kubeadm"
+	"github.com/lestex/kona/internal/execx"
 	"github.com/lestex/kona/internal/kubeconfig"
 	"github.com/lestex/kona/internal/netplan"
 	"github.com/lestex/kona/internal/runtime/container"
 	"github.com/lestex/kona/internal/state"
+	"github.com/lestex/kona/internal/tools"
 )
 
 const (
@@ -35,7 +39,11 @@ const (
 type Manager struct {
 	Store     *state.Store
 	Container *container.Client
-	Log       io.Writer
+	// Host runs commands on macOS (e.g. the Cilium CLI).
+	Host execx.Runner
+	// Tools caches pinned helper binaries.
+	Tools *tools.Cache
+	Log   io.Writer
 	// HostPrefixes returns host interface subnets (overridable in tests).
 	HostPrefixes func() []netip.Prefix
 	// Now and Sleep are overridable in tests.
@@ -44,9 +52,9 @@ type Manager struct {
 }
 
 // NewManager returns a Manager with real host access.
-func NewManager(s *state.Store, c *container.Client, log io.Writer) *Manager {
-	return &Manager{Store: s, Container: c, Log: log, HostPrefixes: netplan.HostPrefixes,
-		Now: time.Now, Sleep: sleep}
+func NewManager(s *state.Store, c *container.Client, host execx.Runner, log io.Writer) *Manager {
+	return &Manager{Store: s, Container: c, Host: host, Tools: &tools.Cache{Dir: filepath.Join(s.Root, "bin")},
+		Log: log, HostPrefixes: netplan.HostPrefixes, Now: time.Now, Sleep: sleep}
 }
 
 func sleep(ctx context.Context, d time.Duration) error {
@@ -183,6 +191,13 @@ func (m *Manager) Create(ctx context.Context, o CreateOptions) (err error) {
 	if err := m.waitAPI(ctx, d, c, deadline); err != nil {
 		return err
 	}
+	if c.CNI == "cilium" {
+		// Nodes only become Ready once the CNI runs, so Cilium goes in
+		// before the remaining nodes join.
+		if err := m.installCilium(ctx, d, c); err != nil {
+			return err
+		}
+	}
 	for _, n := range cps[1:] { // etcd members join one at a time
 		if err := m.ensureNode(ctx, d, c, n, secrets, existing); err != nil {
 			return err
@@ -202,6 +217,11 @@ func (m *Manager) Create(ctx context.Context, o CreateOptions) (err error) {
 	m.logf("• Waiting up to %s for %d nodes to be Ready", time.Until(deadline).Round(time.Second), len(c.Nodes))
 	if err := m.waitNodesReady(ctx, d, c, nodeNames(c.Nodes), deadline, true); err != nil {
 		return err
+	}
+	if c.CNI == "cilium" {
+		if err := m.waitCilium(ctx, c, deadline); err != nil {
+			return err
+		}
 	}
 	path, err := m.WriteKubeconfig(ctx, c)
 	if err != nil {
@@ -234,8 +254,10 @@ func validate(o CreateOptions) error {
 	if o.GPUWorkers > 0 {
 		return errors.New("--gpu-workers is not implemented yet (Phase 3)")
 	}
-	if o.CNI != "" && o.CNI != "default" {
-		return fmt.Errorf("--cni %s is not implemented yet (Phase 2); use --cni default", o.CNI)
+	switch o.CNI {
+	case "", "default", "cilium":
+	default:
+		return fmt.Errorf("unknown --cni %q (want default or cilium)", o.CNI)
 	}
 	if o.Kernel == "" {
 		return errors.New("no guest kernel configured")
@@ -278,7 +300,7 @@ func (m *Manager) plan(ctx context.Context, o CreateOptions) (*state.Cluster, er
 		return nil, err
 	}
 	c := &state.Cluster{
-		Name: o.Name, Distro: o.Distro, CNI: "default", K8sVersion: o.K8sVersion,
+		Name: o.Name, Distro: o.Distro, CNI: cniName(o.CNI), K8sVersion: o.K8sVersion,
 		Image: o.Image, Kernel: o.Kernel, DNS: o.DNS, Phase: state.PhaseCreating,
 		Network: state.Network{Name: NetworkName(o.Name), Subnet: subnet.String(),
 			Gateway: netplan.Gateway(subnet).String(), Prefix: netplan.Prefix},
@@ -585,6 +607,55 @@ func (m *Manager) Delete(ctx context.Context, name string) error {
 		return err
 	}
 	return m.Store.Delete(name)
+}
+
+func cniName(s string) string {
+	if s == "" {
+		return "default"
+	}
+	return s
+}
+
+func (m *Manager) installCilium(ctx context.Context, d distro.Distro, c *state.Cluster) error {
+	cp := c.ControlPlanes()[0].Name
+	if _, err := m.Container.Exec(ctx, cp, d.Kubectl("-n", "kube-system", "get", "daemonset", "cilium")...); err == nil {
+		m.logf("✓ Cilium already installed")
+		return nil
+	}
+	kc, err := m.WriteKubeconfig(ctx, c)
+	if err != nil {
+		return err
+	}
+	cli, err := m.Tools.Ensure(ctx, tools.CiliumCLI())
+	if err != nil {
+		return fmt.Errorf("cilium CLI: %w", err)
+	}
+	m.logf("• Installing Cilium %s (kube-proxy replacement, VXLAN, Hubble)", cni.CiliumVersion())
+	if _, err := m.Host.Run(ctx, cli, cni.CiliumInstallArgs(c, kc, kubeconfig.ContextName(c.Name))...); err != nil {
+		return fmt.Errorf("cilium install: %w", err)
+	}
+	return nil
+}
+
+func (m *Manager) waitCilium(ctx context.Context, c *state.Cluster, deadline time.Time) error {
+	kc, err := kubeconfig.Path(c.Name)
+	if err != nil {
+		return err
+	}
+	cli, err := m.Tools.Ensure(ctx, tools.CiliumCLI())
+	if err != nil {
+		return err
+	}
+	left := time.Until(deadline).Round(time.Second)
+	if left < 10*time.Second {
+		left = 10 * time.Second
+	}
+	m.logf("• Waiting up to %s for Cilium to be healthy", left)
+	if _, err := m.Host.Run(ctx, cli, cni.CiliumStatusArgs(kc, kubeconfig.ContextName(c.Name), left.String())...); err != nil {
+		return fmt.Errorf("cilium status: %s", lastLine(err))
+	}
+	m.logf("✓ Cilium is healthy")
+	return nil
 }
 
 // lastLine returns the last non-empty line of err: tools like k3s print
