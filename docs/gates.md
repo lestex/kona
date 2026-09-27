@@ -529,4 +529,113 @@ $ kona delete cluster rb   # run 2
 ✓ Deleted cluster "rb"
 ```
 
-### 1.3 kubeadm path: not started
+### 1.3 kubeadm path: PASS
+
+Node image `ghcr.io/lestex/kona-node:v1.34.12-kubeadm` (systemd, containerd v2.4.1, runc v1.5.1, kubelet/kubeadm v1.34.12, flannel v0.28.9) was built locally with `make -C images/node build-kubeadm`.
+
+```text
+$ time kona create cluster kadm --distro kubeadm --workers 2
+• Planned cluster "kadm": 1 control plane(s), 2 worker(s) on 192.168.70.0/24
+• Creating network kona-kadm (192.168.70.0/24)
+• Starting kadm-control-plane-1 (192.168.70.10, 2 CPU, 2G)
+• Waiting for the API server on 192.168.70.10
+• Starting kadm-worker-1 (192.168.70.20, 2 CPU, 2G)
+• Starting kadm-worker-2 (192.168.70.21, 2 CPU, 2G)
+• Waiting up to 4m24s for 3 nodes to be Ready
+✓ All 3 nodes Ready
+✓ Wrote kubeconfig /Users/lestex/.kube/kona-kadm (context kona-kadm)
+✓ Cluster "kadm" is ready
+./bin/kona create cluster kadm --distro kubeadm --workers 2 2>&1  0.94s user 0.64s system 3% cpu 46.111 total
+
+$ kubectl --kubeconfig ~/.kube/kona-kadm get nodes -o wide      # from the macOS host
+NAME                   STATUS   ROLES           AGE   VERSION    INTERNAL-IP     EXTERNAL-IP   OS-IMAGE                            KERNEL-VERSION   CONTAINER-RUNTIME
+kadm-control-plane-1   Ready    control-plane   38s   v1.34.12   192.168.70.10   <none>        Fedora Linux 44 (Container Image)   6.18.35-kona     containerd://2.4.1
+kadm-worker-1          Ready    <none>          24s   v1.34.12   192.168.70.20   <none>        Fedora Linux 44 (Container Image)   6.18.35-kona     containerd://2.4.1
+kadm-worker-2          Ready    <none>          20s   v1.34.12   192.168.70.21   <none>        Fedora Linux 44 (Container Image)   6.18.35-kona     containerd://2.4.1
+
+$ kona get nodes --name kadm
+NAME                   ROLE            KIND        IP              VM        READY   VERSION    CLOCK SKEW
+kadm-control-plane-1   control-plane   container   192.168.70.10   running   true    v1.34.12   +0.02s
+kadm-worker-1          worker          container   192.168.70.20   running   true    v1.34.12   +0.02s
+kadm-worker-2          worker          container   192.168.70.21   running   true    v1.34.12   +0.05s
+```
+
+etcd on the block volume. kubeadm's `etcd.local.dataDir` is `/var/lib/etcd/data`, because a fresh ext4 volume has `lost+found` and kubeadm preflight requires an empty directory:
+
+```text
+$ kona ssh --name kadm kadm-control-plane-1 -- findmnt -no SOURCE,FSTYPE,TARGET /var/lib/etcd
+/dev/vdc ext4 /var/lib/etcd
+$ kona ssh --name kadm kadm-control-plane-1 -- ls /var/lib/etcd /var/lib/etcd/data
+/var/lib/etcd:
+data
+lost+found
+
+/var/lib/etcd/data:
+member
+
+$ kona ssh --name kadm kadm-control-plane-1 -- etcdctl --endpoints=https://127.0.0.1:2379 \
+    --cacert=/etc/kubernetes/pki/etcd/ca.crt --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt \
+    --key=/etc/kubernetes/pki/etcd/healthcheck-client.key check perf      # progress bar stripped
+PASS: Throughput is 150 writes/s
+PASS: Slowest request took 0.128374s
+PASS: Stddev is 0.004452s
+PASS
+```
+
+Sonobuoy v0.57.5 quick run:
+
+```text
+$ sonobuoy results $(sonobuoy retrieve)
+Plugin: e2e
+Status: passed
+Total: 7148
+Passed: 5
+Failed: 0
+Skipped: 7143
+
+Plugin: systemd-logs
+Status: passed
+Total: 3
+Passed: 3
+Failed: 0
+Skipped: 0
+
+Run Details:
+API Server version: v1.34.12
+Node health: 3/3 (100%)
+Pods health: 17/17 (100%)
+
+$ sonobuoy results $(sonobuoy retrieve) --mode detailed --plugin e2e   # non-skipped entries
+passed [ReportBeforeSuite]
+passed [SynchronizedBeforeSuite]
+passed [SynchronizedAfterSuite]
+passed [ReportAfterSuite] Kubernetes e2e suite report
+passed [It] [sig-node] Pods should be submitted and removed [NodeConformance] [Conformance]
+```
+
+The first attempt failed on that preflight check, and rollback left nothing behind:
+
+```text
+✗ Create failed, rolling back (use --retain to keep the VMs)
+• Deleting node kadm-control-plane-1
+• Deleting volume kadm-control-plane-1-data
+error: kubeadm init on kadm-control-plane-1: ... [ERROR DirAvailable--var-lib-etcd]: /var/lib/etcd is not empty
+```
+
+### 1.4 k3s regression after the shared entrypoint change: PASS
+
+The entrypoint now makes the static node IP the primary `eth0` address, which flannel `--iface` needs on kubeadm:
+
+```text
+$ time kona create cluster --workers 2
+✓ Cluster "kona" is ready
+./bin/kona create cluster --workers 2 2>&1  0.58s user 0.33s system 6% cpu 13.151 total
+$ kubectl --kubeconfig ~/.kube/kona-kona get nodes
+NAME                   STATUS   ROLES           AGE   VERSION
+kona-control-plane-1   Ready    control-plane   5s    v1.34.11+k3s1
+kona-worker-1          Ready    <none>          1s    v1.34.11+k3s1
+kona-worker-2          Ready    <none>          1s    v1.34.11+k3s1
+$ kona ssh kona-worker-1 -- ip -4 -o addr show eth0
+192.168.70.20/24 scope global eth0
+192.168.70.3/24 scope global secondary
+```
