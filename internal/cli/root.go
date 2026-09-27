@@ -49,6 +49,6 @@ func NewRoot() *cobra.Command {
 			return g.init()
 		},
 	}
-	root.AddCommand(newVersionCmd(), newDoctorCmd(g))
+	root.AddCommand(newCreateCmd(g), newDeleteCmd(g), newGetCmd(g), newSSHCmd(g), newDoctorCmd(g), newVersionCmd())
 	return root
 }
