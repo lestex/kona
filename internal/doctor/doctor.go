@@ -3,7 +3,10 @@ package doctor
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"runtime"
@@ -47,11 +50,13 @@ type Doctor struct {
 	GOOS   string
 	GOARCH string
 	Stat   func(string) (os.FileInfo, error)
+	// Hash returns a file's sha256 (nil skips the kernel pin check).
+	Hash func(string) (string, error)
 }
 
 // New returns a Doctor for the real host.
 func New(r execx.Runner) *Doctor {
-	return &Doctor{Runner: r, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, Stat: os.Stat}
+	return &Doctor{Runner: r, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, Stat: os.Stat, Hash: FileSHA256}
 }
 
 // Run executes every check.
@@ -137,15 +142,45 @@ func (d *Doctor) container(ctx context.Context) []Result {
 
 func (d *Doctor) kernel(path string) Result {
 	r := Result{Name: "kernel"}
+	fix := "make -C kernel && mkdir -p \"$(dirname '" + path + "')\" && cp kernel/out/vmlinux-" +
+		version.Get("KERNEL_VERSION") + "-kona '" + path + "'  (or pass --kernel)"
 	if _, err := d.Stat(path); err != nil {
 		r.Status = Fail
 		r.Message = "kona guest kernel not found at " + path
-		r.Fix = "make -C kernel && mkdir -p \"$(dirname '" + path + "')\" && cp kernel/out/vmlinux-" +
-			version.Get("KERNEL_VERSION") + "-kona '" + path + "'  (or pass --kernel)"
+		r.Fix = fix
 		return r
+	}
+	// A stale kernel from an older kona would silently lack newer options
+	// (e.g. CONFIG_INET_DIAG for Cilium), so the exact build is pinned.
+	if want := version.Checksum("KONA_KERNEL_SHA256_ARM64"); want != "" && d.Hash != nil {
+		got, err := d.Hash(path)
+		if err != nil {
+			r.Status, r.Message = Fail, "cannot read kernel: "+err.Error()
+			return r
+		}
+		if got != want {
+			r.Status = Fail
+			r.Message = fmt.Sprintf("kernel at %s is not the build this kona expects (sha256 %.12s…, want %.12s…)", path, got, want)
+			r.Fix = fix
+			return r
+		}
 	}
 	r.Status, r.Message = OK, path
 	return r
+}
+
+// FileSHA256 returns the hex sha256 of a file.
+func FileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func (d *Doctor) dns(ctx context.Context) Result {
