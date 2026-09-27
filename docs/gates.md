@@ -639,3 +639,100 @@ $ kona ssh kona-worker-1 -- ip -4 -o addr show eth0
 192.168.70.20/24 scope global eth0
 192.168.70.3/24 scope global secondary
 ```
+
+### 1.5 Default moved to Kubernetes 1.37: PASS (both distros)
+
+Re-run on 2026-09-27 after pinning `KUBERNETES_VERSION=v1.37.1`, `K3S_VERSION=v1.37.0+k3s1`, `CRICTL_VERSION=v1.37.0` and `ETCD_VERSION=v3.7.2`, with checksums re-pinned and both images rebuilt. Sections 1.1–1.4 above are the 1.34 runs.
+
+k3s (default):
+
+```text
+$ kona version | grep -E 'KUBERNETES|K3S|ETCD|CRICTL'
+CRICTL_VERSION              v1.37.0
+ETCD_VERSION                v3.7.2
+K3S_VERSION                 v1.37.0+k3s1
+KUBERNETES_VERSION          v1.37.1
+
+$ time kona create cluster --workers 2
+• Planned cluster "kona": 1 control plane(s), 2 worker(s) on 192.168.70.0/24
+• Creating network kona-kona (192.168.70.0/24)
+• Starting kona-control-plane-1 (192.168.70.10, 2 CPU, 2G)
+• Waiting for the API server on 192.168.70.10
+• Starting kona-worker-1 (192.168.70.20, 2 CPU, 2G)
+• Starting kona-worker-2 (192.168.70.21, 2 CPU, 2G)
+• Waiting up to 4m53s for 3 nodes to be Ready
+✓ All 3 nodes Ready
+✓ Wrote kubeconfig /Users/lestex/.kube/kona-kona (context kona-kona)
+✓ Cluster "kona" is ready
+./bin/kona create cluster --workers 2 2>&1  0.52s user 0.31s system 6% cpu 12.749 total
+
+$ kubectl --kubeconfig ~/.kube/kona-kona get nodes -o wide
+NAME                   STATUS   ROLES           AGE   VERSION        INTERNAL-IP     EXTERNAL-IP   OS-IMAGE                            KERNEL-VERSION         CONTAINER-RUNTIME
+kona-control-plane-1   Ready    control-plane   4s    v1.37.0+k3s1   192.168.70.10   <none>        Fedora Linux 44 (Container Image)   6.18.35-kona (arm64)   containerd://2.3.4-k3s1
+kona-worker-1          Ready    <none>          1s    v1.37.0+k3s1   192.168.70.20   <none>        Fedora Linux 44 (Container Image)   6.18.35-kona (arm64)   containerd://2.3.4-k3s1
+kona-worker-2          Ready    <none>          0s    v1.37.0+k3s1   192.168.70.21   <none>        Fedora Linux 44 (Container Image)   6.18.35-kona (arm64)   containerd://2.3.4-k3s1
+
+$ kona ssh kona-control-plane-1 -- findmnt -no SOURCE,FSTYPE,TARGET /var/lib/rancher/k3s/server/db
+/dev/vdc ext4 /var/lib/rancher/k3s/server/db
+
+$ sonobuoy run --mode quick --wait=15 && sonobuoy results $(sonobuoy retrieve)
+Plugin: e2e
+Status: passed
+Total: 3213
+Passed: 8
+Failed: 0
+Skipped: 3205
+...
+API Server version: v1.37.0+k3s1
+Node health: 3/3 (100%)
+Pods health: 9/9 (100%)
+# non-skipped e2e entries
+passed [ReportBeforeSuite]
+passed [ReportBeforeSuite]
+passed [SynchronizedBeforeSuite]
+passed [SynchronizedAfterSuite]
+passed [ReportAfterSuite] Invariant Metrics
+passed [ReportAfterSuite] Kubernetes e2e suite report
+passed [It] [sig-node] Pods should be submitted and removed [Conformance] [NodeConformance]
+passed [ReportAfterSuite] [sig-testing] Log Check
+```
+
+kubeadm:
+
+```text
+$ time kona create cluster kadm --distro kubeadm --workers 2
+...
+✓ Cluster "kadm" is ready
+./bin/kona create cluster kadm --distro kubeadm --workers 2 2>&1  0.97s user 0.67s system 3% cpu 48.994 total
+
+$ kubectl --kubeconfig ~/.kube/kona-kadm get nodes -o wide
+NAME                   STATUS   ROLES           AGE   VERSION   INTERNAL-IP     EXTERNAL-IP   OS-IMAGE                            KERNEL-VERSION         CONTAINER-RUNTIME
+kadm-control-plane-1   Ready    control-plane   28s   v1.37.1   192.168.71.10   <none>        Fedora Linux 44 (Container Image)   6.18.35-kona (arm64)   containerd://2.4.1
+kadm-worker-1          Ready    <none>          15s   v1.37.1   192.168.71.20   <none>        Fedora Linux 44 (Container Image)   6.18.35-kona (arm64)   containerd://2.4.1
+kadm-worker-2          Ready    <none>          11s   v1.37.1   192.168.71.21   <none>        Fedora Linux 44 (Container Image)   6.18.35-kona (arm64)   containerd://2.4.1
+
+$ kona ssh --name kadm kadm-control-plane-1 -- findmnt -no SOURCE,FSTYPE,TARGET /var/lib/etcd
+/dev/vdc ext4 /var/lib/etcd
+$ kona ssh --name kadm kadm-control-plane-1 -- etcdctl ... check perf      # progress bar stripped
+PASS: Throughput is 150 writes/s
+PASS: Slowest request took 0.025849s
+PASS: Stddev is 0.001034s
+PASS
+$ kubectl -n kube-system get pod -l component=etcd -o jsonpath='{..image}'
+registry.k8s.io/etcd:3.7.0-0
+$ kona ssh --name kadm kadm-control-plane-1 -- crictl images | grep pause      # only the pinned sandbox
+registry.k8s.io/pause                     3.10.2              3884a33719231       268kB
+
+$ sonobuoy results $(sonobuoy retrieve)
+Plugin: e2e
+Status: passed
+Total: 3213
+Passed: 8
+Failed: 0
+Skipped: 3205
+...
+API Server version: v1.37.1
+Node health: 3/3 (100%)
+Pods health: 17/17 (100%)
+# non-skipped e2e entries: same 8 as k3s above, all passed
+```
