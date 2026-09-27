@@ -70,3 +70,17 @@ func TestTokenOnlyInEnv(t *testing.T) {
 		t.Fatal("Kubectl args")
 	}
 }
+
+func TestCiliumDisablesFlannelAndKubeProxy(t *testing.T) {
+	c := cluster(1)
+	c.CNI = "cilium"
+	a := args(t, c, "kona-control-plane-1")
+	for _, want := range []string{"--flannel-backend none", "--disable-network-policy", "--disable-kube-proxy"} {
+		if !strings.Contains(a, want) {
+			t.Errorf("server args missing %q: %s", want, a)
+		}
+	}
+	if w := args(t, c, "kona-worker-1"); strings.Contains(w, "flannel") {
+		t.Errorf("agent args mention flannel: %s", w)
+	}
+}

@@ -65,9 +65,12 @@ func nodeArgs(c *state.Cluster, n state.Node) ([]string, error) {
 	join := "https://" + first.IP + ":6443"
 	common := []string{
 		"--node-ip", n.IP,
-		"--flannel-iface", "eth0",
 		"--node-label", "kona.dev/cluster=" + c.Name,
 		"--node-label", "kona.dev/role=" + n.Role,
+	}
+	cilium := c.CNI == "cilium"
+	if !cilium {
+		common = append(common, "--flannel-iface", "eth0")
 	}
 	switch n.Role {
 	case state.RoleControlPlane:
@@ -84,6 +87,12 @@ func nodeArgs(c *state.Cluster, n state.Node) ([]string, error) {
 			if cp.Name != n.Name {
 				args = append(args, "--tls-san", cp.IP)
 			}
+		}
+		if cilium {
+			// Cilium replaces flannel, the network policy controller and
+			// kube-proxy (kubeProxyReplacement=true); agents inherit these
+			// settings from the server.
+			args = append(args, "--flannel-backend", "none", "--disable-network-policy", "--disable-kube-proxy")
 		}
 		if len(cps) > 1 {
 			// Embedded etcd for HA; its data dir is under DataDir.

@@ -140,3 +140,17 @@ func TestBootstrapInitThenIdempotent(t *testing.T) {
 		}
 	}
 }
+
+func TestBootstrapWithCiliumSkipsKubeProxyAndFlannel(t *testing.T) {
+	c := testCluster()
+	c.CNI = "cilium"
+	s, _ := Kubeadm{}.NewSecrets()
+	x := &fakeExec{files: map[string]bool{}}
+	if err := (Kubeadm{Sleep: func(time.Duration) {}}).Bootstrap(context.Background(), x, c, c.Nodes[0], s); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(x.calls, "\n")
+	if !strings.Contains(joined, "--skip-phases=addon/kube-proxy") || strings.Contains(joined, "flannel") {
+		t.Fatalf("calls:\n%s", joined)
+	}
+}

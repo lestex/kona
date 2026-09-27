@@ -126,6 +126,10 @@ func (k Kubeadm) Bootstrap(ctx context.Context, x distro.Execer, c *state.Cluste
 	if first {
 		cfg, err = initConfig(c, n, s)
 		cmd = []string{"kubeadm", "init", "--config", ConfigPath, "--upload-certs"}
+		if c.CNI == "cilium" {
+			// Cilium runs with kubeProxyReplacement=true.
+			cmd = append(cmd, "--skip-phases=addon/kube-proxy")
+		}
 	} else {
 		var hash string
 		if hash, err = caHash(ctx, x, cps[0].Name); err != nil {
@@ -143,7 +147,7 @@ func (k Kubeadm) Bootstrap(ctx context.Context, x distro.Execer, c *state.Cluste
 	if out, err := x.Exec(ctx, n.Name, cmd...); err != nil {
 		return fmt.Errorf("%s on %s: %w\n%s", strings.Join(cmd[:2], " "), n.Name, err, out)
 	}
-	if first {
+	if first && c.CNI != "cilium" {
 		if err := writeFile(ctx, x, n.Name, "/etc/kubernetes/kona-flannel.yml", flannelManifest); err != nil {
 			return err
 		}
