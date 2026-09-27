@@ -253,6 +253,7 @@ func TestValidate(t *testing.T) {
 		func(o *CreateOptions) { o.Memory = "lots" },
 		func(o *CreateOptions) { o.Kernel = "/nope" },
 		func(o *CreateOptions) { o.Name = "Bad" },
+		func(o *CreateOptions) { o.Distro = "k0s" },
 	}
 	for i, f := range bad {
 		oo := o

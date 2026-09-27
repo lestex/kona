@@ -11,7 +11,7 @@ import (
 
 func TestRunArgs(t *testing.T) {
 	got := strings.Join(RunArgs(RunSpec{
-		Name: "kona-worker-1", Image: "img:1", Kernel: "/k", Network: "kona-kona",
+		Name: "kona-worker-1", Init: true, Tmpfs: []string{"/run"}, Image: "img:1", Kernel: "/k", Network: "kona-kona",
 		MAC: "52:54:00:00:00:01", MTU: 1500, DNS: "8.8.8.8", CPUs: 2, Memory: "2G",
 		Env:     map[string]string{"B": "2", "A": "1"},
 		Labels:  map[string]string{LabelCluster: "kona"},
@@ -19,7 +19,7 @@ func TestRunArgs(t *testing.T) {
 		Publish: []string{"51820:51820/udp"},
 		Args:    []string{"agent", "--x"},
 	}), " ")
-	want := "run -d --progress none --name kona-worker-1 --init --cap-add ALL --masked-path NONE --read-only-path NONE " +
+	want := "run -d --progress none --name kona-worker-1 --cap-add ALL --masked-path NONE --read-only-path NONE --init --tmpfs /run " +
 		"--kernel /k --network kona-kona,mac=52:54:00:00:00:01,mtu=1500 --dns 8.8.8.8 --cpus 2 --memory 2G " +
 		"-e A=1 -e B=2 --label kona.cluster=kona -v db:/var/lib/db -p 51820:51820/udp img:1 agent --x"
 	if got != want {
