@@ -140,6 +140,8 @@ func (c *Client) DeleteVolume(ctx context.Context, name string) error {
 // RunSpec describes one node VM.
 type RunSpec struct {
 	Name    string
+	Init    bool // run `container`'s init as PID 1 (reaps zombies)
+	Tmpfs   []string
 	Image   string
 	Kernel  string
 	Network string
@@ -158,9 +160,15 @@ type RunSpec struct {
 // RunArgs returns the `container run` arguments for spec.
 func RunArgs(s RunSpec) []string {
 	args := []string{"run", "-d", "--progress", "none", "--name", s.Name,
-		// Nodes run their own init, containerd and kubelet: full caps and no
-		// masked or read-only /proc and /sys paths (same as `container k8s`).
-		"--init", "--cap-add", "ALL", "--masked-path", "NONE", "--read-only-path", "NONE"}
+		// Nodes run containerd and the kubelet: full caps and no masked or
+		// read-only /proc and /sys paths (same as `container k8s`).
+		"--cap-add", "ALL", "--masked-path", "NONE", "--read-only-path", "NONE"}
+	if s.Init {
+		args = append(args, "--init")
+	}
+	for _, t := range s.Tmpfs {
+		args = append(args, "--tmpfs", t)
+	}
 	if s.Kernel != "" {
 		args = append(args, "--kernel", s.Kernel)
 	}
