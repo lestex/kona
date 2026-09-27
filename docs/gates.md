@@ -356,3 +356,177 @@ cpu1 -> internet: ok
 
 Sleep/wake: **not run yet** (deferred by the user; see [networking.md](networking.md#open-items-need-user-action-before-phase-1)).
 
+
+## Phase 1: `kona create cluster --workers 2` on Apple `container`
+
+### 1.1 k3s path: PASS
+
+Run on 2026-09-26/27. Node image `ghcr.io/lestex/kona-node:v1.34.11-k3s1` was built locally with `make -C images/node build`; it is not published yet.
+
+```text
+$ kona doctor
+✓ macos            macOS 26.6.2
+✓ arch             arm64
+✓ container        container 1.4.1
+✓ container-system services running
+✓ kernel           /Users/lestex/Library/Application Support/kona/kernels/vmlinux-6.18.35-kona
+✓ dns              nodes will use 8.8.8.8 (the vmnet gateway forwarder is not relied on)
+✓ krunkit          krunkit 1.3.2
+✓ vmnet-helper     vmnet-helper 0.13.0
+
+$ time kona create cluster --workers 2
+• Planned cluster "kona": 1 control plane(s), 2 worker(s) on 192.168.70.0/24
+• Creating network kona-kona (192.168.70.0/24)
+• Starting kona-control-plane-1 (192.168.70.10, 2 CPU, 2G)
+• Waiting for the API server on 192.168.70.10
+• Starting kona-worker-1 (192.168.70.20, 2 CPU, 2G)
+• Starting kona-worker-2 (192.168.70.21, 2 CPU, 2G)
+• Waiting up to 4m52s for 3 nodes to be Ready
+✓ All 3 nodes Ready
+✓ Wrote kubeconfig /Users/lestex/.kube/kona-kona (context kona-kona)
+✓ Cluster "kona" is ready
+
+  kubectl --kubeconfig /Users/lestex/.kube/kona-kona get nodes
+
+./bin/kona create cluster --workers 2 2>&1  0.52s user 0.29s system 6% cpu 12.705 total
+
+$ kubectl --kubeconfig ~/.kube/kona-kona get nodes -o wide      # from the macOS host
+NAME                   STATUS   ROLES           AGE     VERSION         INTERNAL-IP     EXTERNAL-IP   OS-IMAGE                            KERNEL-VERSION   CONTAINER-RUNTIME
+kona-control-plane-1   Ready    control-plane   2m13s   v1.34.11+k3s1   192.168.70.10   <none>        Fedora Linux 44 (Container Image)   6.18.35-kona     containerd://2.2.7-k3s1
+kona-worker-1          Ready    <none>          2m8s    v1.34.11+k3s1   192.168.70.20   <none>        Fedora Linux 44 (Container Image)   6.18.35-kona     containerd://2.2.7-k3s1
+kona-worker-2          Ready    <none>          2m7s    v1.34.11+k3s1   192.168.70.21   <none>        Fedora Linux 44 (Container Image)   6.18.35-kona     containerd://2.2.7-k3s1
+
+$ ls -l ~/.kube/kona-kona
+-rw-------@ 1 lestex  staff  2961 Sep 26 21:07 /Users/lestex/.kube/kona-kona
+
+$ kona get clusters
+NAME   PHASE   STATUS   DISTRO   NODES   SUBNET            ISSUES
+kona   ready   ok       k3s      3/3     192.168.70.0/24   -
+
+$ kona get nodes
+NAME                   ROLE            KIND        IP              VM        READY   VERSION         CLOCK SKEW
+kona-control-plane-1   control-plane   container   192.168.70.10   running   true    v1.34.11+k3s1   +0.02s
+kona-worker-1          worker          container   192.168.70.20   running   true    v1.34.11+k3s1   +0.03s
+kona-worker-2          worker          container   192.168.70.21   running   true    v1.34.11+k3s1   +0.03s
+
+$ ls -la "~/Library/Application Support/kona/kona/"
+-rw-r--r--@ 1 lestex  staff  1100 Sep 26 21:07 cluster.json
+-rw-------@ 1 lestex  staff    65 Sep 26 21:07 token
+```
+
+Datastore on a block-backed volume (ext4 image attached as virtio-blk, not virtiofs), and the API server reachable from macOS:
+
+```text
+$ kona ssh kona-control-plane-1 -- findmnt -no SOURCE,FSTYPE,TARGET /var/lib/rancher/k3s/server/db
+/dev/vdc ext4 /var/lib/rancher/k3s/server/db
+$ kona ssh kona-control-plane-1 -- ls /var/lib/rancher/k3s/server/db
+lost+found
+state.db
+state.db-shm
+state.db-wal
+$ curl -sk https://192.168.70.10:6443/livez -o /dev/null -w '%{http_code}\n'     # unauthenticated, from macOS
+401
+$ kubectl --kubeconfig ~/.kube/kona-kona get --raw /livez
+ok
+```
+
+Sonobuoy v0.57.5 quick run:
+
+```text
+$ sonobuoy run --kubeconfig ~/.kube/kona-kona --mode quick --wait=15
+...
+21:13:10             e2e                 global   complete   passed   Passed:  0, Failed:  0, Remaining:  1
+21:13:10    systemd-logs   kona-control-plane-1   complete   passed
+21:13:10    systemd-logs          kona-worker-1   complete   passed
+21:13:10    systemd-logs          kona-worker-2   complete   passed
+21:13:10 Sonobuoy has completed. Use `sonobuoy retrieve` to get results.
+
+$ sonobuoy results $(sonobuoy retrieve)
+Plugin: e2e
+Status: passed
+Total: 7148
+Passed: 5
+Failed: 0
+Skipped: 7143
+
+Plugin: systemd-logs
+Status: passed
+Total: 3
+Passed: 3
+Failed: 0
+Skipped: 0
+
+Run Details:
+API Server version: v1.34.11+k3s1
+Node health: 3/3 (100%)
+Pods health: 8/8 (100%)
+
+$ sonobuoy results $(sonobuoy retrieve) --mode detailed --plugin e2e   # non-skipped entries
+passed [ReportBeforeSuite]
+passed [SynchronizedBeforeSuite]
+passed [SynchronizedAfterSuite]
+passed [ReportAfterSuite] Kubernetes e2e suite report
+passed [It] [sig-node] Pods should be submitted and removed [NodeConformance] [Conformance]
+```
+
+(The live progress line reads "Passed: 0 … Remaining: 1" even after completion, a Sonobuoy display quirk. The retrieved results above are authoritative.)
+
+### 1.2 Partial-failure handling: PASS
+
+Forced failure (`--wait 3s`) rolls back with no orphans:
+
+```text
+$ kona create cluster rb --workers 1 --memory 1G --wait 3s
+• Planned cluster "rb": 1 control plane(s), 1 worker(s) on 192.168.71.0/24
+• Creating network kona-rb (192.168.71.0/24)
+• Starting rb-control-plane-1 (192.168.71.10, 2 CPU, 1G)
+• Waiting for the API server on 192.168.71.10
+✗ Create failed, rolling back (use --retain to keep the VMs)
+• Deleting node rb-control-plane-1
+• Deleting volume rb-control-plane-1-data
+error: API server on rb-control-plane-1 not ready before --wait expired: ...
+exit=1
+$ kona get clusters
+NAME   PHASE   STATUS   DISTRO   NODES   SUBNET            ISSUES
+kona   ready   ok       k3s      3/3     192.168.70.0/24   -
+$ container ls -a | grep -c ' rb-'; container volume ls | grep -c rb-; container network ls | grep -c kona-rb
+0
+0
+0
+```
+
+With `--retain`, the cluster is kept and flagged, and re-running `create` resumes it:
+
+```text
+$ kona create cluster rb --workers 1 --memory 1G --wait 3s --retain
+...
+error: API server on rb-control-plane-1 not ready before --wait expired: error: stat /etc/rancher/k3s/k3s.yaml: no such file or directory (see `container logs rb-control-plane-1`)
+cluster "rb" retained for debugging; resume with `kona create cluster rb` or remove with `kona delete cluster rb`
+$ kona get clusters
+NAME   PHASE    STATUS     DISTRO   NODES   SUBNET            ISSUES
+kona   ready    ok         k3s      3/3     192.168.70.0/24   -
+rb     failed   degraded   k3s      1/2     192.168.71.0/24   rb-worker-1 missing
+$ kona create cluster rb --workers 1 --memory 1G   # resume
+Resuming cluster "rb" (phase failed)
+✓ Node rb-control-plane-1 already running
+• Waiting for the API server on 192.168.71.10
+• Starting rb-worker-1 (192.168.71.20, 2 CPU, 1G)
+• Waiting up to 4m57s for 2 nodes to be Ready
+✓ All 2 nodes Ready
+✓ Wrote kubeconfig /Users/lestex/.kube/kona-rb (context kona-rb)
+✓ Cluster "rb" is ready
+```
+
+Delete is idempotent:
+
+```text
+$ kona delete cluster rb   # run 1
+• Deleting node rb-worker-1
+• Deleting node rb-control-plane-1
+• Deleting volume rb-control-plane-1-data
+✓ Deleted cluster "rb"
+$ kona delete cluster rb   # run 2
+✓ Deleted cluster "rb"
+```
+
+### 1.3 kubeadm path: not started
