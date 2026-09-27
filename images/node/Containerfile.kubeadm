@@ -1,0 +1,61 @@
+# kona node image for Apple `container`, kubeadm distro: systemd as PID 1,
+# upstream containerd/runc/CNI plugins and kubelet/kubeadm/kubectl. Same
+# Fedora base as the k3s image. Every artifact is pinned by sha256 from
+# versions.env (hack/pin-checksums.sh).
+ARG FEDORA_DIGEST
+FROM docker.io/library/fedora:44@${FEDORA_DIGEST}
+
+ARG KUBERNETES_VERSION
+ARG KUBEADM_SHA256
+ARG KUBELET_SHA256
+ARG KUBECTL_SHA256
+ARG CONTAINERD_VERSION
+ARG CONTAINERD_SHA256
+ARG RUNC_VERSION
+ARG RUNC_SHA256
+ARG CNI_PLUGINS_VERSION
+ARG CNI_PLUGINS_SHA256
+ARG CRICTL_VERSION
+ARG CRICTL_SHA256
+ARG ETCD_VERSION
+ARG ETCD_SHA256
+
+RUN dnf -y install --setopt=install_weak_deps=False \
+      systemd ca-certificates chrony conntrack-tools ethtool iproute iptables-nft \
+      iputils kmod nftables procps-ng socat util-linux wireguard-tools \
+ && dnf clean all \
+ && sed -i 's/^makestep .*/makestep 1 -1/' /etc/chrony.conf \
+ && systemctl enable chronyd \
+ && systemctl mask systemd-firstboot.service systemd-udevd.service systemd-resolved.service \
+      getty.target console-getty.service systemd-networkd.service systemd-logind.service \
+      systemd-logind-varlink.socket \
+ && mkdir -p /etc/kubernetes/manifests
+
+RUN set -eu; get() { curl -fsSL -o "$1" "$2"; echo "$3  $1" | sha256sum -c -; }; cd /tmp; \
+    for b in kubeadm kubelet kubectl; do \
+      eval sum=\$$(echo $b | tr a-z A-Z)_SHA256; \
+      get /usr/local/bin/$b "https://dl.k8s.io/release/$KUBERNETES_VERSION/bin/linux/arm64/$b" "$sum"; \
+      chmod 0755 /usr/local/bin/$b; \
+    done; \
+    get containerd.tgz "https://github.com/containerd/containerd/releases/download/$CONTAINERD_VERSION/containerd-${CONTAINERD_VERSION#v}-linux-arm64.tar.gz" "$CONTAINERD_SHA256"; \
+    tar -C /usr/local -xzf containerd.tgz; \
+    get /usr/local/sbin/runc "https://github.com/opencontainers/runc/releases/download/$RUNC_VERSION/runc.arm64" "$RUNC_SHA256"; \
+    chmod 0755 /usr/local/sbin/runc; \
+    mkdir -p /opt/cni/bin; \
+    get cni.tgz "https://github.com/containernetworking/plugins/releases/download/$CNI_PLUGINS_VERSION/cni-plugins-linux-arm64-$CNI_PLUGINS_VERSION.tgz" "$CNI_PLUGINS_SHA256"; \
+    tar -C /opt/cni/bin -xzf cni.tgz; \
+    get crictl.tgz "https://github.com/kubernetes-sigs/cri-tools/releases/download/$CRICTL_VERSION/crictl-$CRICTL_VERSION-linux-arm64.tar.gz" "$CRICTL_SHA256"; \
+    tar -C /usr/local/bin -xzf crictl.tgz; \
+    get etcd.tgz "https://github.com/etcd-io/etcd/releases/download/$ETCD_VERSION/etcd-$ETCD_VERSION-linux-arm64.tar.gz" "$ETCD_SHA256"; \
+    tar -xzf etcd.tgz --strip-components=1 -C /usr/local/bin "etcd-$ETCD_VERSION-linux-arm64/etcdctl"; \
+    rm -f /tmp/*.tgz
+
+COPY kubeadm/ /
+RUN systemctl enable containerd kubelet \
+ && printf 'runtime-endpoint: unix:///run/containerd/containerd.sock\n' > /etc/crictl.yaml
+
+COPY kona-node /usr/local/bin/kona-node
+RUN chmod 0755 /usr/local/bin/kona-node
+ENV KONA_INIT=systemd container=oci
+STOPSIGNAL SIGRTMIN+3
+ENTRYPOINT ["/usr/local/bin/kona-node"]
