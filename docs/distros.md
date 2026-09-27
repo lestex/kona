@@ -8,9 +8,9 @@ inside the node VM.
 |---|---|---|
 | Node image | Fedora 44 + one `k3s` binary (containerd, runc, flannel, CNI plugins, kubectl bundled) + air-gap system images | Fedora 44 + systemd + containerd + kubelet/kubeadm/kubectl |
 | PID 1 in the node | `container`'s init (`--init`), then `kona-node` → `k3s` | systemd |
-| Create time, 1 CP + 2 workers | **12.7 s** (measured, [gates.md](gates.md)) | not measured yet |
-| Datastore | single server: SQLite (kine) on the control plane's block volume. HA (`--control-planes 3`): embedded etcd on that volume | etcd static pod, data dir on the block volume; `etcdctl check perf` in the gate |
-| Bundled add-ons | CoreDNS, local-path-provisioner, metrics-server, ServiceLB (traefik disabled by kona) | CoreDNS and kube-proxy only; kona installs the CNI |
+| Create time, 1 CP + 2 workers | **12.7–13.2 s** (measured, [gates.md](gates.md)) | **46 s** (measured; includes pulling control-plane images and flannel) |
+| Datastore | single server: SQLite (kine) on the control plane's block volume. HA (`--control-planes 3`): embedded etcd on that volume | etcd static pod, data at `/var/lib/etcd/data` on the block volume. `etcdctl check perf`: PASS, 150 writes/s, slowest request 128 ms |
+| Bundled add-ons | CoreDNS, local-path-provisioner, metrics-server, ServiceLB (traefik disabled by kona), flannel | CoreDNS and kube-proxy; kona applies flannel v0.28.9 (embedded manifest) |
 | Fidelity to upstream | Upstream Kubernetes, packaged differently (k3s flags, kine, single process) | Closest to how production clusters are built (static pods, kubeadm config, separate components) |
 | Memory at idle, per node | lower: one process | higher: separate apiserver, controller-manager, scheduler, and etcd on the CP |
 
