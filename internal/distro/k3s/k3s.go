@@ -4,14 +4,24 @@ package k3s
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"strings"
 
 	"github.com/lestex/kona/internal/distro"
 	"github.com/lestex/kona/internal/state"
+	"github.com/lestex/kona/internal/version"
 )
 
 // AdminKubeconfigPath is where k3s writes the admin kubeconfig.
 const AdminKubeconfigPath = "/etc/rancher/k3s/k3s.yaml"
+
+// DataDir holds kine/SQLite (single server) or embedded etcd (HA).
+const DataDir = "/var/lib/rancher/k3s/server/db"
+
+// SecretToken is the cluster join token key in Secrets.
+const SecretToken = "token"
 
 // K3s implements distro.Distro.
 type K3s struct{}
@@ -21,8 +31,32 @@ var _ distro.Distro = K3s{}
 // Name implements distro.Distro.
 func (K3s) Name() string { return "k3s" }
 
-// NodeArgs implements distro.Distro.
-func (K3s) NodeArgs(c *state.Cluster, n state.Node, _ string) ([]string, error) {
+// DefaultImage implements distro.Distro. OCI tags cannot contain '+'.
+func (K3s) DefaultImage() string {
+	return "ghcr.io/lestex/kona-node:" + strings.ReplaceAll(version.Get("K3S_VERSION"), "+", "-")
+}
+
+// NewSecrets implements distro.Distro.
+func (K3s) NewSecrets() (distro.Secrets, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return nil, err
+	}
+	return distro.Secrets{SecretToken: hex.EncodeToString(b)}, nil
+}
+
+// NodeSpec implements distro.Distro. The token travels as K3S_TOKEN so it
+// never shows up in k3s' own process arguments.
+func (K3s) NodeSpec(c *state.Cluster, n state.Node, s distro.Secrets) (distro.NodeSpec, error) {
+	args, err := nodeArgs(c, n)
+	if err != nil {
+		return distro.NodeSpec{}, err
+	}
+	return distro.NodeSpec{Args: args, Env: map[string]string{"K3S_TOKEN": s[SecretToken]},
+		UseInit: true, DataDir: DataDir}, nil
+}
+
+func nodeArgs(c *state.Cluster, n state.Node) ([]string, error) {
 	cps := c.ControlPlanes()
 	if len(cps) == 0 {
 		return nil, fmt.Errorf("cluster %s has no control plane", c.Name)
@@ -52,15 +86,14 @@ func (K3s) NodeArgs(c *state.Cluster, n state.Node, _ string) ([]string, error) 
 			}
 		}
 		if len(cps) > 1 {
-			// Embedded etcd for HA; its data dir is under server/db on the
-			// block volume.
+			// Embedded etcd for HA; its data dir is under DataDir.
 			if n.Name == first.Name {
 				args = append(args, "--cluster-init")
 			} else {
 				args = append(args, "--server", join)
 			}
 		}
-		// Single server: kine/SQLite at server/db/state.db, also on the volume.
+		// Single server: kine/SQLite at DataDir/state.db.
 		return append(args, common...), nil
 	case state.RoleWorker, state.RoleGPUWorker:
 		return append([]string{"agent", "--server", join}, common...), nil
@@ -69,10 +102,9 @@ func (K3s) NodeArgs(c *state.Cluster, n state.Node, _ string) ([]string, error) 
 	}
 }
 
-// NodeEnv implements distro.Distro. The token travels as K3S_TOKEN so it
-// never shows up in k3s' own process arguments.
-func (K3s) NodeEnv(_ *state.Cluster, _ state.Node, token string) map[string]string {
-	return map[string]string{"K3S_TOKEN": token}
+// Bootstrap implements distro.Distro: k3s bootstraps itself from its args.
+func (K3s) Bootstrap(context.Context, distro.Execer, *state.Cluster, state.Node, distro.Secrets) error {
+	return nil
 }
 
 // AdminKubeconfig implements distro.Distro.
