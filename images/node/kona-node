@@ -75,6 +75,18 @@ if [ "${KONA_INIT:-}" != systemd ] && [ -f /sys/fs/cgroup/cgroup.controllers ]; 
     > /sys/fs/cgroup/cgroup.subtree_control
 fi
 
+# Mount propagation: the VM's root mount is private, but CNIs mount into
+# the host from pods (Cilium: bpffs at /sys/fs/bpf, cgroup2 at
+# /run/cilium/cgroupv2) and need shared propagation, as in kind. systemd
+# (kubeadm image) does this itself.
+if [ "${KONA_INIT:-}" != systemd ]; then
+  mount --make-rshared /
+  if ! mountpoint -q /sys/fs/bpf; then
+    mount -t bpf bpf /sys/fs/bpf
+  fi
+  mount --make-shared /sys/fs/bpf
+fi
+
 sysctl -qw net.ipv4.ip_forward=1
 sysctl -qw net.bridge.bridge-nf-call-iptables=1
 sysctl -qw net.bridge.bridge-nf-call-ip6tables=1

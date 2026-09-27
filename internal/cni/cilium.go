@@ -9,12 +9,6 @@ import (
 	"github.com/lestex/kona/internal/version"
 )
 
-// k3s keeps containerd's CNI directories under its data dir.
-const (
-	k3sCNIBin  = "/var/lib/rancher/k3s/data/cni"
-	k3sCNIConf = "/var/lib/rancher/k3s/agent/etc/cni/net.d"
-)
-
 // CiliumVersion is the pinned Cilium release without the leading "v".
 func CiliumVersion() string { return strings.TrimPrefix(version.Get("CILIUM_VERSION"), "v") }
 
@@ -25,6 +19,10 @@ func CiliumVersion() string { return strings.TrimPrefix(version.Get("CILIUM_VERS
 // WireGuard, so a tunnel keeps pod routing independent of the underlay).
 // The API server is addressed directly (k8sServiceHost) because there is
 // no kube-proxy to program the kubernetes Service.
+//
+// CNI paths stay at Cilium's defaults for both distros: with
+// --flannel-backend=none k3s leaves containerd on /etc/cni/net.d and
+// /opt/cni/bin (its own data-dir paths apply only in flannel mode).
 func CiliumInstallArgs(c *state.Cluster, kubeconfig, context string) []string {
 	cp := c.ControlPlanes()[0]
 	args := []string{"install",
@@ -39,9 +37,6 @@ func CiliumInstallArgs(c *state.Cluster, kubeconfig, context string) []string {
 		"--set", "operator.replicas=1",
 		"--set", "hubble.enabled=true",
 		"--set", "hubble.relay.enabled=true",
-	}
-	if c.Distro == "k3s" {
-		args = append(args, "--set", "cni.binPath="+k3sCNIBin, "--set", "cni.confPath="+k3sCNIConf)
 	}
 	return args
 }
