@@ -1,0 +1,22 @@
+# containerd 2.x config for kona kubeadm nodes.
+version = 3
+
+[plugins.'io.containerd.cri.v1.runtime']
+  # CDI is on by default in containerd 2.x; kept explicit because GPU nodes
+  # rely on it (kona-venus-dra writes specs to /var/run/cdi).
+  enable_cdi = true
+  cdi_spec_dirs = ['/etc/cdi', '/var/run/cdi']
+
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runc]
+  runtime_type = 'io.containerd.runc.v2'
+
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runc.options]
+  SystemdCgroup = true
+  BinaryName = '/usr/local/sbin/runc'
+
+[plugins.'io.containerd.cri.v1.images'.pinned_images]
+  sandbox = 'registry.k8s.io/pause:3.10.1'
+
+# Registry mirrors (kona-registry, Phase 4) are dropped in as hosts.toml files.
+[plugins.'io.containerd.cri.v1.images'.registry]
+  config_path = '/etc/containerd/certs.d'
