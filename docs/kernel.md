@@ -23,6 +23,10 @@ kona therefore does **not** maintain its own kernel config. It uses
 - `build.sh` fails if any fragment option is dropped by `olddefconfig` (an
   unmet dependency) and prints the `CONFIG_*` name.
 - `LOCALVERSION=-kona`, so `uname -r` = `6.18.35-kona`.
+- The built kernel's sha256 is pinned in `versions.env`
+  (`KONA_KERNEL_SHA256_ARM64`). `kona doctor` fails when the installed
+  kernel doesn't match, so a stale kernel from an older kona that lacks newer
+  options is never used silently.
 - Output: `kernel/out/vmlinux-6.18.35-kona` (uncompressed arm64 `Image`,
   ~30 MB) plus `.sha256` and the effective `.config`. It is released as
   `kona-kernel-6.18.35-kona-arm64.tar.zst`.
@@ -42,6 +46,8 @@ built `.config`. Toolchain-version lines are excluded.
 | `NETFILTER_XT_MATCH_SOCKET` | n | y | `xt_socket`. Cilium L7 proxy / TPROXY with kube-proxy replacement. |
 | `CRYPTO_SHA1` | n | y | Listed in Cilium requirements (BPF program tag hashing, IPsec). |
 | `SCHEDSTATS` | n | y | Listed in Cilium requirements (Hubble / process stats). |
+| `INET_DIAG`, `INET_TCP_DIAG`, `INET_UDP_DIAG` | n / – / – | y | `sock_diag` netlink. Cilium kube-proxy replacement iterates sockets through it. Added in Phase 2, after `cilium connectivity test` failed its log check with `failed while iterating sockets: no such file or directory`. Also makes `ss` work in nodes. |
+| `INET_DIAG_DESTROY` | – | y | `SOCK_DESTROY`: lets Cilium reset sockets still connected to a deleted Service backend (for example a UDP DNS client pinned to a removed CoreDNS pod). Added in Phase 2 with the options above. |
 | `GENEVE` | n | y | Cilium `tunnelProtocol=geneve`. The spec requires VXLAN/Geneve; VXLAN was already `y`. |
 | `WIREGUARD` | n | y | Networking option (c) overlay and Cilium transparent encryption. |
 | `DUMMY` | n | y | kube-proxy IPVS mode creates the `kube-ipvs0` dummy interface. |
