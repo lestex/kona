@@ -24,10 +24,16 @@ func newSSHCmd(g *globals) *cobra.Command {
 			if !ok {
 				return fmt.Errorf("cluster %q has no node %q (see: kona get nodes --name %s)", name, args[0], name)
 			}
-			if n.Kind != state.KindContainer {
-				return fmt.Errorf("ssh to %s nodes is not implemented yet", n.Kind)
-			}
 			command := args[1:]
+			if n.Kind == state.KindKrunkit {
+				sshArgs := g.manager(cmd).SSHArgs(c, n, command...)
+				if len(command) == 0 {
+					sshArgs = append([]string{"-t"}, sshArgs...)
+				}
+				x := exec.CommandContext(cmd.Context(), "ssh", sshArgs...)
+				x.Stdin, x.Stdout, x.Stderr = os.Stdin, os.Stdout, os.Stderr
+				return x.Run()
+			}
 			execArgs := []string{"exec", "-i"}
 			if len(command) == 0 {
 				command = []string{"/bin/bash", "-l"}

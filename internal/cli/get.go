@@ -7,9 +7,7 @@ import (
 	"strings"
 
 	"github.com/lestex/kona/internal/cluster"
-	"github.com/lestex/kona/internal/execx"
 	"github.com/lestex/kona/internal/kubeconfig"
-	"github.com/lestex/kona/internal/runtime/container"
 	"github.com/spf13/cobra"
 )
 
@@ -17,10 +15,6 @@ func newGetCmd(g *globals) *cobra.Command {
 	cmd := &cobra.Command{Use: "get", Short: "Display resources (clusters, nodes, kubeconfig)"}
 	cmd.AddCommand(newGetClustersCmd(g), newGetNodesCmd(g), newGetKubeconfigCmd(g))
 	return cmd
-}
-
-func (g *globals) manager(cmd *cobra.Command) *cluster.Manager {
-	return cluster.NewManager(g.store, container.New(execx.OS{}), execx.OS{}, cmd.ErrOrStderr())
 }
 
 func newGetClustersCmd(g *globals) *cobra.Command {

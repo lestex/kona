@@ -11,7 +11,6 @@ import (
 	"github.com/lestex/kona/internal/cluster"
 	"github.com/lestex/kona/internal/doctor"
 	"github.com/lestex/kona/internal/execx"
-	"github.com/lestex/kona/internal/runtime/container"
 	"github.com/spf13/cobra"
 )
 
@@ -40,8 +39,19 @@ func newCreateClusterCmd(g *globals) *cobra.Command {
 				}
 				o.Kernel = k
 			}
+			if o.GPUImage == "" {
+				img, err := g.defaultGPUImage()
+				if err != nil {
+					return err
+				}
+				o.GPUImage = img
+			}
 			run := execx.OS{}
-			rs := doctor.New(run).Run(ctx, doctor.Options{GPU: o.GPUWorkers > 0, Kernel: o.Kernel})
+			dopts := doctor.Options{GPU: o.GPUWorkers > 0, Kernel: o.Kernel}
+			if o.GPUWorkers > 0 {
+				dopts.GPUImage = o.GPUImage
+			}
+			rs := doctor.New(run).Run(ctx, dopts)
 			if doctor.Failed(rs) {
 				printDoctor(cmd.ErrOrStderr(), rs)
 				return errDoctorFailed
@@ -53,14 +63,16 @@ func newCreateClusterCmd(g *globals) *cobra.Command {
 				o.Image = cluster.DefaultImage(o.Distro, o.K8sVersion)
 			}
 			o.HostMemory = hostMemory(ctx, run)
-			m := cluster.NewManager(g.store, container.New(run), run, cmd.ErrOrStderr())
-			return m.Create(ctx, o)
+			return g.manager(cmd).Create(ctx, o)
 		},
 	}
 	f := cmd.Flags()
 	f.IntVar(&o.Workers, "workers", 2, "number of worker nodes")
 	f.IntVar(&o.ControlPlanes, "control-planes", 1, "number of control-plane nodes (odd; >1 uses embedded etcd)")
-	f.IntVar(&o.GPUWorkers, "gpu-workers", 0, "number of krunkit GPU worker nodes")
+	f.IntVar(&o.GPUWorkers, "gpu-workers", 0, "number of krunkit GPU worker nodes (Vulkan via Venus; --distro k3s)")
+	f.IntVar(&o.GPUCPUs, "gpu-cpus", 4, "vCPUs per GPU node")
+	f.StringVar(&o.GPUMemory, "gpu-memory", "4G", "fixed memory per GPU node")
+	f.StringVar(&o.GPUImage, "gpu-image", "", "GPU node disk image (default: the installed kona-gpu-node image)")
 	f.StringVar(&o.Distro, "distro", "k3s", "Kubernetes distribution: k3s|kubeadm")
 	f.StringVar(&o.CNI, "cni", "default", "CNI: default|cilium")
 	f.StringVar(&o.K8sVersion, "k8s-version", "", "Kubernetes version (default: the pinned one; must match a published node image)")
