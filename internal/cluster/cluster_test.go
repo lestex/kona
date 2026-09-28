@@ -393,6 +393,11 @@ func gpuSetup(t *testing.T, venus bool) (*Manager, *sim, CreateOptions) {
 		VmnetHelper:   script("vmnet-helper", `echo '{"vmnet_mtu":1500}'; exec sleep 30`),
 		HelperTimeout: 5 * time.Second, StopGrace: 200 * time.Millisecond}
 	m.PortFree = func(int) bool { return true }
+	var imported []string
+	m.ImportImage = func(_ context.Context, _ *state.Cluster, n state.Node, image string) error {
+		imported = append(imported, n.Name+" "+image)
+		return nil
+	}
 	host := m.Host.(*execx.Fake)
 	host.Match = func(line string) (execx.FakeResponse, bool) {
 		if strings.HasPrefix(line, "ssh ") && strings.Contains(line, "vulkaninfo") {
@@ -452,6 +457,10 @@ func TestCreateWithGPUWorker(t *testing.T) {
 	if strings.Contains(joined, "taint node kona-gpu-worker-1") {
 		t.Fatal("Venus node must stay tainted")
 	}
+	if !strings.Contains(joined, "apply -f /etc/kona/kona-venus-dra.yaml") ||
+		!strings.Contains(joined, "rollout status daemonset/kona-venus-dra") {
+		t.Fatalf("DRA driver not deployed:\n%s", joined)
+	}
 	if err := m.Delete(context.Background(), "kona"); err != nil {
 		t.Fatal(err)
 	}
@@ -467,6 +476,9 @@ func TestGPUWithoutVenusIsUntainted(t *testing.T) {
 		t.Fatal(err)
 	}
 	joined := strings.Join(m.Container.Runner.(*execx.Fake).Calls, "\n")
+	if strings.Contains(joined, "kona-venus-dra") {
+		t.Fatal("DRA driver deployed without a Venus node")
+	}
 	if !strings.Contains(joined, "taint node kona-gpu-worker-1 kona.dev/gpu-") ||
 		!strings.Contains(joined, "kona.dev/gpu=unavailable") {
 		t.Fatalf("no untaint/label for a node without Venus:\n%s", joined)

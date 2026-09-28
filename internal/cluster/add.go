@@ -100,8 +100,14 @@ func (m *Manager) AddNode(ctx context.Context, o AddOptions) error {
 		return err
 	}
 	if o.GPU {
-		if err := m.checkVenus(ctx, d, c, n); err != nil {
+		ok, err := m.checkVenus(ctx, d, c, n)
+		if err != nil {
 			return err
+		}
+		if ok {
+			if err := m.deployVenusDRA(ctx, d, c, []state.Node{n}); err != nil {
+				return err
+			}
 		}
 	}
 	m.logf("✓ Node %s (%s) joined cluster %q", n.Name, n.IP, c.Name)

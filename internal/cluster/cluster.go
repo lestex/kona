@@ -49,7 +49,9 @@ type Manager struct {
 	GPU *krunkit.Runtime
 	// PortFree reports whether a host UDP port can be published (tests).
 	PortFree func(int) bool
-	Log      io.Writer
+	// ImportImage loads a local image into a GPU node (nil: via SSH).
+	ImportImage func(ctx context.Context, c *state.Cluster, n state.Node, image string) error
+	Log         io.Writer
 	// HostPrefixes returns host interface subnets (overridable in tests).
 	HostPrefixes func() []netip.Prefix
 	// Now and Sleep are overridable in tests.
@@ -238,10 +240,18 @@ func (m *Manager) Create(ctx context.Context, o CreateOptions) (err error) {
 			return err
 		}
 	}
+	var venus []state.Node
 	for _, n := range c.GPUNodes() {
-		if err := m.checkVenus(ctx, d, c, n); err != nil {
+		ok, err := m.checkVenus(ctx, d, c, n)
+		if err != nil {
 			return err
 		}
+		if ok {
+			venus = append(venus, n)
+		}
+	}
+	if err := m.deployVenusDRA(ctx, d, c, venus); err != nil {
+		return err
 	}
 	path, err := m.WriteKubeconfig(ctx, c)
 	if err != nil {

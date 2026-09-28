@@ -295,14 +295,14 @@ func VenusDevice(summary string) string {
 
 // checkVenus labels a Ready GPU node, or untaints it with a loud warning
 // when Venus is unavailable so it still serves as a plain worker.
-func (m *Manager) checkVenus(ctx context.Context, d distro.Distro, c *state.Cluster, n state.Node) error {
+func (m *Manager) checkVenus(ctx context.Context, d distro.Distro, c *state.Cluster, n state.Node) (bool, error) {
 	out, err := m.Host.Run(ctx, "ssh", m.SSHArgs(c, n, "vulkaninfo", "--summary")...)
 	dev := VenusDevice(string(out))
 	cp := c.ControlPlanes()[0].Name
 	if dev != "" {
 		m.logf("✓ %s: Vulkan via Venus (%s)", n.Name, dev)
 		_, err := m.Container.Exec(ctx, cp, d.Kubectl("label", "node", n.Name, "--overwrite", LabelGPU+"="+GPUAvailable)...)
-		return err
+		return err == nil, err
 	}
 	reason := "no Venus device in vulkaninfo"
 	if err != nil {
@@ -311,10 +311,10 @@ func (m *Manager) checkVenus(ctx context.Context, d distro.Distro, c *state.Clus
 	m.logf("!!! WARNING: %s has no Venus GPU (%s).\n!!! It joins as an ordinary worker: untainted, label %s=%s, and the DRA plugin will not run there.",
 		n.Name, reason, LabelGPU, GPUUnavailable)
 	if _, err := m.Container.Exec(ctx, cp, d.Kubectl("taint", "node", n.Name, "kona.dev/gpu-")...); err != nil {
-		return err
+		return false, err
 	}
 	_, err = m.Container.Exec(ctx, cp, d.Kubectl("label", "node", n.Name, "--overwrite", LabelGPU+"="+GPUUnavailable)...)
-	return err
+	return false, err
 }
 
 // planGPU allocates the GPU subnet (once) and adds count GPU workers.
