@@ -82,6 +82,9 @@ func (m *Manager) List(ctx context.Context) ([]Info, error) {
 			Subnet: s.Network.Subnet, Nodes: len(s.Nodes)}
 		for _, n := range s.Nodes {
 			up, exists := running[s.Name][n.Name]
+			if n.Kind == state.KindKrunkit {
+				up, exists = m.gpuRunning(s, n), true
+			}
 			switch {
 			case !exists:
 				i.Issues = append(i.Issues, n.Name+" missing")
@@ -120,6 +123,10 @@ func (m *Manager) List(ctx context.Context) ([]Info, error) {
 	return out, nil
 }
 
+func (m *Manager) gpuRunning(c *state.Cluster, n state.Node) bool {
+	return m.GPU != nil && c.GPUNetwork.Subnet != "" && m.GPU.Running(m.krunkitNode(c, n))
+}
+
 // NodeInfo describes one node for `kona get nodes`.
 type NodeInfo struct {
 	Name    string `json:"name"`
@@ -154,13 +161,19 @@ func (m *Manager) Nodes(ctx context.Context, name string) ([]NodeInfo, error) {
 		if ct, ok := cs[n.Name]; ok {
 			ni.VM = ct.Status.State
 		}
+		if n.Kind == state.KindKrunkit {
+			ni.VM = "stopped"
+			if m.gpuRunning(c, n) {
+				ni.VM = "running"
+			}
+		}
 		if st, ok := kube[n.Name]; ok {
 			ni.Ready, ni.Version = strconv.FormatBool(st.Ready), st.Version
 		} else if kube != nil {
 			ni.Ready = "not registered"
 		}
 		if ni.VM == "running" {
-			if s, err := m.skew(ctx, n.Name); err == nil {
+			if s, err := m.skew(ctx, c, n); err == nil {
 				ni.SkewSeconds = &s
 			}
 		}
@@ -171,9 +184,15 @@ func (m *Manager) Nodes(ctx context.Context, name string) ([]NodeInfo, error) {
 
 // skew measures guest-minus-host clock offset, taking the host time at the
 // midpoint of the exec round-trip.
-func (m *Manager) skew(ctx context.Context, node string) (float64, error) {
+func (m *Manager) skew(ctx context.Context, c *state.Cluster, n state.Node) (float64, error) {
 	before := m.Now()
-	out, err := m.Container.Exec(ctx, node, "date", "+%s.%N")
+	var out []byte
+	var err error
+	if n.Kind == state.KindKrunkit {
+		out, err = m.Host.Run(ctx, "ssh", m.SSHArgs(c, n, "date", "+%s.%N")...)
+	} else {
+		out, err = m.Container.Exec(ctx, n.Name, "date", "+%s.%N")
+	}
 	after := m.Now()
 	if err != nil {
 		return 0, err

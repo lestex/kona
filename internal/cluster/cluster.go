@@ -22,8 +22,10 @@ import (
 	"github.com/lestex/kona/internal/kubeconfig"
 	"github.com/lestex/kona/internal/netplan"
 	"github.com/lestex/kona/internal/runtime/container"
+	"github.com/lestex/kona/internal/runtime/krunkit"
 	"github.com/lestex/kona/internal/state"
 	"github.com/lestex/kona/internal/tools"
+	"github.com/lestex/kona/internal/wg"
 )
 
 const (
@@ -43,7 +45,11 @@ type Manager struct {
 	Host execx.Runner
 	// Tools caches pinned helper binaries.
 	Tools *tools.Cache
-	Log   io.Writer
+	// GPU runs krunkit GPU nodes (nil when krunkit/vmnet-helper are absent).
+	GPU *krunkit.Runtime
+	// PortFree reports whether a host UDP port can be published (tests).
+	PortFree func(int) bool
+	Log      io.Writer
 	// HostPrefixes returns host interface subnets (overridable in tests).
 	HostPrefixes func() []netip.Prefix
 	// Now and Sleep are overridable in tests.
@@ -54,7 +60,7 @@ type Manager struct {
 // NewManager returns a Manager with real host access.
 func NewManager(s *state.Store, c *container.Client, host execx.Runner, log io.Writer) *Manager {
 	return &Manager{Store: s, Container: c, Host: host, Tools: &tools.Cache{Dir: filepath.Join(s.Root, "bin")},
-		Log: log, HostPrefixes: netplan.HostPrefixes, Now: time.Now, Sleep: sleep}
+		Log: log, HostPrefixes: netplan.HostPrefixes, PortFree: netplan.UDPPortFree, Now: time.Now, Sleep: sleep}
 }
 
 func sleep(ctx context.Context, d time.Duration) error {
@@ -74,17 +80,21 @@ type CreateOptions struct {
 	ControlPlanes int
 	Workers       int
 	GPUWorkers    int
-	Distro        string
-	CNI           string
-	K8sVersion    string
-	Image         string
-	Kernel        string
-	DNS           string
-	CPUs          int
-	Memory        string
-	Wait          time.Duration
-	Retain        bool
-	HostMemory    int64
+	GPUCPUs       int
+	GPUMemory     string
+	// GPUImage is the krunkit GPU node disk image (raw).
+	GPUImage   string
+	Distro     string
+	CNI        string
+	K8sVersion string
+	Image      string
+	Kernel     string
+	DNS        string
+	CPUs       int
+	Memory     string
+	Wait       time.Duration
+	Retain     bool
+	HostMemory int64
 }
 
 // DistroFor returns the Distro implementation for name.
@@ -207,19 +217,29 @@ func (m *Manager) Create(ctx context.Context, o CreateOptions) (err error) {
 		}
 	}
 	for _, n := range c.Nodes {
-		if n.Role == state.RoleControlPlane {
+		if n.Role == state.RoleControlPlane || n.Kind != state.KindContainer {
 			continue
 		}
 		if err := m.ensureNode(ctx, d, c, n, secrets, existing); err != nil {
 			return err
 		}
 	}
-	m.logf("• Waiting up to %s for %d nodes to be Ready", time.Until(deadline).Round(time.Second), len(c.Nodes))
+	if len(c.GPUNodes()) > 0 {
+		if err := m.startGPUNodes(ctx, c, secrets, o.GPUImage); err != nil {
+			return err
+		}
+	}
+	m.logf("• Waiting up to %s for %d nodes to be Ready", deadline.Sub(m.Now()).Round(time.Second), len(c.Nodes))
 	if err := m.waitNodesReady(ctx, d, c, nodeNames(c.Nodes), deadline, true); err != nil {
 		return err
 	}
 	if c.CNI == "cilium" {
 		if err := m.waitCilium(ctx, c, deadline); err != nil {
+			return err
+		}
+	}
+	for _, n := range c.GPUNodes() {
+		if err := m.checkVenus(ctx, d, c, n); err != nil {
 			return err
 		}
 	}
@@ -251,8 +271,19 @@ func validate(o CreateOptions) error {
 	if o.Workers < 0 {
 		return errors.New("--workers must be >= 0")
 	}
+	if o.GPUWorkers < 0 {
+		return errors.New("--gpu-workers must be >= 0")
+	}
 	if o.GPUWorkers > 0 {
-		return errors.New("--gpu-workers is not implemented yet (Phase 3)")
+		if o.Distro != "k3s" {
+			return errors.New("--gpu-workers is only implemented for --distro k3s")
+		}
+		if _, err := os.Stat(o.GPUImage); err != nil {
+			return fmt.Errorf("GPU node image %s: %w (run `kona doctor --gpu`)", o.GPUImage, err)
+		}
+		if _, err := ParseSize(o.GPUMemory); err != nil {
+			return err
+		}
 	}
 	switch o.CNI {
 	case "", "default", "cilium":
@@ -276,24 +307,9 @@ func validate(o CreateOptions) error {
 
 // plan allocates the subnet, node names, IPs and MACs and saves the state.
 func (m *Manager) plan(ctx context.Context, o CreateOptions) (*state.Cluster, error) {
-	used := m.HostPrefixes()
-	nets, err := m.Container.Networks(ctx)
+	used, err := m.usedPrefixes(ctx)
 	if err != nil {
 		return nil, err
-	}
-	for _, n := range nets {
-		if p, err := netip.ParsePrefix(n.Subnet()); err == nil {
-			used = append(used, p)
-		}
-	}
-	others, err := m.Store.List()
-	if err != nil {
-		return nil, err
-	}
-	for _, oc := range others {
-		if p, err := netip.ParsePrefix(oc.Network.Subnet); err == nil {
-			used = append(used, p)
-		}
 	}
 	subnet, err := netplan.PickSubnet(used)
 	if err != nil {
@@ -329,7 +345,27 @@ func (m *Manager) plan(ctx context.Context, o CreateOptions) (*state.Cluster, er
 		}
 		add(state.RoleWorker, i, ip, false)
 	}
-	m.logf("• Planned cluster %q: %d control plane(s), %d worker(s) on %s", o.Name, o.ControlPlanes, o.Workers, subnet)
+	// Every CPU node publishes a WireGuard port, so GPU nodes can join now
+	// or later (kona add node --gpu) without recreating CPU nodes.
+	taken, err := m.usedWGPorts(o.Name)
+	if err != nil {
+		return nil, err
+	}
+	ports, err := netplan.PickPorts(len(c.Nodes), taken, m.PortFree)
+	if err != nil {
+		return nil, err
+	}
+	for i := range c.Nodes {
+		c.Nodes[i].WGPort = ports[i]
+	}
+	if err := m.planGPU(c, used, o.GPUWorkers, o.GPUCPUs, o.GPUMemory); err != nil {
+		return nil, err
+	}
+	msg := fmt.Sprintf("• Planned cluster %q: %d control plane(s), %d worker(s) on %s", o.Name, o.ControlPlanes, o.Workers, subnet)
+	if o.GPUWorkers > 0 {
+		msg += fmt.Sprintf(", %d GPU worker(s) on %s", o.GPUWorkers, c.GPUNetwork.Subnet)
+	}
+	m.logf("%s", msg)
 	return c, m.Store.Save(c)
 }
 
@@ -442,11 +478,15 @@ func (m *Manager) ensureNode(ctx context.Context, d distro.Distro, c *state.Clus
 	for k, v := range spec.Env {
 		env[k] = v
 	}
+	var publish []string
+	if n.WGPort != 0 {
+		publish = []string{fmt.Sprintf("%d:%d/udp", n.WGPort, wg.ListenPort)}
+	}
 	m.logf("• Starting %s (%s, %d CPU, %s)", n.Name, n.IP, n.CPUs, n.Memory)
 	if err := m.Container.Run(ctx, container.RunSpec{
 		Name: n.Name, Init: spec.UseInit, Tmpfs: spec.Tmpfs, Image: c.Image, Kernel: c.Kernel,
 		Network: c.Network.Name, MAC: n.MAC, MTU: nodeMTU, DNS: c.DNS, CPUs: n.CPUs, Memory: n.Memory,
-		Env: env, Labels: labels, Volumes: vols, Args: spec.Args,
+		Env: env, Labels: labels, Volumes: vols, Args: spec.Args, Publish: publish,
 	}); err != nil {
 		return err
 	}
@@ -575,6 +615,20 @@ func (m *Manager) Kubeconfig(ctx context.Context, c *state.Cluster) ([]byte, err
 // from labels, so it also cleans up clusters whose state is gone.
 func (m *Manager) Delete(ctx context.Context, name string) error {
 	var errs []error
+	if c, err := m.Store.Load(name); err == nil && m.GPU != nil {
+		for _, n := range c.GPUNodes() {
+			m.logf("• Deleting GPU node %s", n.Name)
+			errs = append(errs, m.GPU.Delete(ctx, m.krunkitNode(c, n)))
+		}
+	}
+	// Orphaned krunkit/vmnet-helper processes (state lost mid-create): their
+	// command lines point into the cluster's state and socket dirs.
+	for _, dir := range []string{filepath.Join(m.Store.Dir(name), "nodes") + "/", RunDir(name) + "/"} {
+		if pids := krunkit.KillMatching(dir); len(pids) > 0 {
+			m.logf("• Killed %d orphaned GPU node process(es)", len(pids))
+		}
+	}
+	errs = append(errs, os.RemoveAll(RunDir(name)))
 	cs, err := m.Container.Containers(ctx)
 	if err != nil {
 		return err
@@ -660,7 +714,7 @@ func (m *Manager) waitCilium(ctx context.Context, c *state.Cluster, deadline tim
 	if err != nil {
 		return err
 	}
-	left := time.Until(deadline).Round(time.Second)
+	left := deadline.Sub(m.Now()).Round(time.Second)
 	if left < 10*time.Second {
 		left = 10 * time.Second
 	}

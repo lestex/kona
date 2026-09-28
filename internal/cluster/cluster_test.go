@@ -16,6 +16,7 @@ import (
 	"github.com/lestex/kona/internal/distro"
 	"github.com/lestex/kona/internal/execx"
 	"github.com/lestex/kona/internal/runtime/container"
+	"github.com/lestex/kona/internal/runtime/krunkit"
 	"github.com/lestex/kona/internal/state"
 	"github.com/lestex/kona/internal/tools"
 )
@@ -35,7 +36,8 @@ type sim struct {
 	containers map[string]map[string]string // name -> labels
 	failRun    string                       // container name whose run fails
 	notReady   bool
-	cilium     bool // cilium DaemonSet exists
+	cilium     bool     // cilium DaemonSet exists
+	extraNodes []string // non-container nodes (GPU) reported by kubectl
 }
 
 func newSim() *sim {
@@ -119,7 +121,11 @@ func (s *sim) runner() *execx.Fake {
 				return ok("ok")
 			case strings.HasSuffix(cmd, "get nodes -o json"):
 				var items []string
+				names := append([]string{}, s.extraNodes...)
 				for n := range s.containers {
+					names = append(names, n)
+				}
+				for _, n := range names {
 					st := "True"
 					if s.notReady {
 						st = "False"
@@ -361,4 +367,137 @@ func mustLoad(t *testing.T, m *Manager, name string) *state.Cluster {
 		t.Fatal(err)
 	}
 	return c
+}
+
+const venusSummary = `Devices:
+========
+GPU0:
+	apiVersion         = 1.2.0
+	deviceName         = Virtio-GPU Venus (Apple M3 Pro)
+	driverName         = venus
+GPU1:
+	deviceName         = llvmpipe (LLVM 22.1.0, 128 bits)
+	driverName         = llvmpipe
+`
+
+func gpuSetup(t *testing.T, venus bool) (*Manager, *sim, CreateOptions) {
+	t.Helper()
+	m, s, _, o := setup(t)
+	dir := t.TempDir()
+	script := func(name, body string) string {
+		p := filepath.Join(dir, name)
+		os.WriteFile(p, []byte("#!/bin/sh\n"+body+"\n"), 0o755)
+		return p
+	}
+	m.GPU = &krunkit.Runtime{Krunkit: script("krunkit", "sleep 30"),
+		VmnetHelper:   script("vmnet-helper", `echo '{"vmnet_mtu":1500}'; exec sleep 30`),
+		HelperTimeout: 5 * time.Second, StopGrace: 200 * time.Millisecond}
+	m.PortFree = func(int) bool { return true }
+	host := m.Host.(*execx.Fake)
+	host.Match = func(line string) (execx.FakeResponse, bool) {
+		if strings.HasPrefix(line, "ssh ") && strings.Contains(line, "vulkaninfo") {
+			if venus {
+				return execx.FakeResponse{Out: []byte(venusSummary)}, true
+			}
+			return execx.FakeResponse{Out: []byte("GPU0:\n\tdeviceName = llvmpipe\n\tdriverName = llvmpipe\n")}, true
+		}
+		return execx.FakeResponse{}, false
+	}
+	img := filepath.Join(dir, "gpu.raw")
+	os.WriteFile(img, []byte("raw"), 0o644)
+	o.GPUWorkers, o.GPUCPUs, o.GPUMemory, o.GPUImage = 1, 4, "4G", img
+	s.extraNodes = []string{"kona-gpu-worker-1"}
+	return m, s, o
+}
+
+func TestCreateWithGPUWorker(t *testing.T) {
+	m, s, o := gpuSetup(t, true)
+	t.Cleanup(func() { m.Delete(context.Background(), "kona") })
+	var calls []string
+	inner := m.Container.Runner.(*execx.Fake)
+	if err := m.Create(context.Background(), o); err != nil {
+		t.Fatalf("Create: %v\n%s", err, m.Log)
+	}
+	calls = inner.Calls
+	c := mustLoad(t, m, "kona")
+	g := c.GPUNodes()
+	if len(g) != 1 || g[0].Name != "kona-gpu-worker-1" || g[0].Kind != state.KindKrunkit ||
+		c.GPUNetwork.Subnet != "192.168.71.0/24" || g[0].IP != "192.168.71.10" {
+		t.Fatalf("gpu plan: %+v %+v", c.GPUNetwork, g)
+	}
+	ports := map[int]bool{}
+	for _, n := range c.CPUNodes() {
+		if n.WGPort < 51820 || ports[n.WGPort] {
+			t.Fatalf("bad/duplicate WG port on %s: %d", n.Name, n.WGPort)
+		}
+		ports[n.WGPort] = true
+	}
+	joined := strings.Join(calls, "\n")
+	if !strings.Contains(joined, fmt.Sprintf("-p %d:51820/udp", c.ControlPlanes()[0].WGPort)) {
+		t.Fatal("control plane does not publish its WireGuard port")
+	}
+	if !strings.Contains(joined, "exec kona-worker-2 /usr/local/bin/kona-wg") {
+		t.Fatal("CPU nodes were not given the WireGuard config")
+	}
+	kn := m.krunkitNode(c, g[0])
+	if !m.GPU.Running(kn) {
+		t.Fatal("GPU VM not running")
+	}
+	if _, err := os.Stat(kn.Seed()); err != nil {
+		t.Fatalf("seed ISO: %v", err)
+	}
+	if !strings.Contains(joined, "label node kona-gpu-worker-1 --overwrite kona.dev/gpu=venus") {
+		t.Fatalf("Venus label missing:\n%s", joined)
+	}
+	if strings.Contains(joined, "taint node kona-gpu-worker-1") {
+		t.Fatal("Venus node must stay tainted")
+	}
+	if err := m.Delete(context.Background(), "kona"); err != nil {
+		t.Fatal(err)
+	}
+	if m.GPU.Running(kn) || len(s.containers) != 0 {
+		t.Fatal("GPU VM or containers survived delete")
+	}
+}
+
+func TestGPUWithoutVenusIsUntainted(t *testing.T) {
+	m, _, o := gpuSetup(t, false)
+	t.Cleanup(func() { m.Delete(context.Background(), "kona") })
+	if err := m.Create(context.Background(), o); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(m.Container.Runner.(*execx.Fake).Calls, "\n")
+	if !strings.Contains(joined, "taint node kona-gpu-worker-1 kona.dev/gpu-") ||
+		!strings.Contains(joined, "kona.dev/gpu=unavailable") {
+		t.Fatalf("no untaint/label for a node without Venus:\n%s", joined)
+	}
+	if !strings.Contains(m.Log.(*bytes.Buffer).String(), "WARNING") {
+		t.Fatal("no loud warning")
+	}
+}
+
+func TestGPUSeed(t *testing.T) {
+	c := &state.Cluster{Name: "kona", DNS: "8.8.8.8",
+		GPUNetwork: state.Network{Subnet: "192.168.71.0/24", Gateway: "192.168.71.1", Prefix: 24}}
+	n := state.Node{Name: "kona-gpu-worker-1", IP: "192.168.71.10", MAC: "52:54:00:aa:bb:cc"}
+	seed := GPUSeed(c, n, "ssh-ed25519 AAAA kona-kona", "TOKEN", "[Interface]\n", "192.168.70.0/24\n", []string{"--server", "https://x:6443"})
+	nc := seed["network-config"]
+	for _, want := range []string{`macaddress: "52:54:00:aa:bb:cc"`, "addresses: [192.168.71.10/24]", "via: 192.168.71.1", "addresses: [8.8.8.8]"} {
+		if !strings.Contains(nc, want) {
+			t.Errorf("network-config missing %q:\n%s", want, nc)
+		}
+	}
+	ud := seed["user-data"]
+	if !strings.Contains(ud, "/etc/kona/k3s-agent.env, permissions: '0600'") || strings.Contains(ud, "TOKEN") {
+		t.Errorf("token must be inside the 0600 env file (base64), not inline:\n%s", ud)
+	}
+}
+
+func TestVenusDevice(t *testing.T) {
+	if d := VenusDevice(venusSummary); d != "Virtio-GPU Venus (Apple M3 Pro)" {
+		t.Fatalf("VenusDevice = %q", d)
+	}
+	if d := VenusDevice("GPU0:\n deviceName = llvmpipe\n driverName = llvmpipe\n"); d != "" {
+		t.Fatalf("llvmpipe detected as Venus: %q", d)
+	}
 }

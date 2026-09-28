@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -201,6 +202,24 @@ func (r *Runtime) Delete(ctx context.Context, n Node) error {
 		return err
 	}
 	return os.RemoveAll(n.Dir)
+}
+
+// KillMatching SIGKILLs every process whose command line contains substr
+// (krunkit and vmnet-helper of a cluster whose state is gone). It returns
+// the pids it killed.
+func KillMatching(substr string) []int {
+	out, _ := exec.Command("pgrep", "-f", regexp.QuoteMeta(substr)).Output()
+	var pids []int
+	for _, f := range strings.Fields(string(out)) {
+		pid, err := strconv.Atoi(f)
+		if err != nil || pid == os.Getpid() {
+			continue
+		}
+		if syscall.Kill(pid, syscall.SIGKILL) == nil {
+			pids = append(pids, pid)
+		}
+	}
+	return pids
 }
 
 func (r *Runtime) killPidfile(path string) {
