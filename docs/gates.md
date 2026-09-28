@@ -736,3 +736,132 @@ Node health: 3/3 (100%)
 Pods health: 17/17 (100%)
 # non-skipped e2e entries: same 8 as k3s above, all passed
 ```
+
+
+## Phase 2: `--cni cilium`
+
+Cilium v1.20.2 with Cilium CLI v0.20.1. kona downloads the CLI, verifies its pinned sha256, and caches it in `~/Library/Application Support/kona/bin/`, running it with a kona-private Helm home. Settings: `kubeProxyReplacement=true`, `routingMode=tunnel` and `tunnelProtocol=vxlan` (the Phase 0 choice), `ipam.mode=kubernetes`, and Hubble with relay.
+
+> **Compatibility caveat:** Cilium 1.20's docs list Kubernetes 1.33–1.36 as e2e-tested. 1.37 is not listed yet and "depends on the backward compatibility offered by Kubernetes". The full connectivity suite below passes on 1.37 for both distros.
+
+### 2.1 k3s + Cilium: PASS
+
+```text
+$ time kona create cluster --cni cilium --workers 2
+...
+• Installing Cilium 1.20.2 (kube-proxy replacement, VXLAN, Hubble)
+...
+✓ All 3 nodes Ready
+• Waiting up to 3m39s for Cilium to be healthy
+✓ Cilium is healthy
+✓ Cluster "kona" is ready
+./bin/kona create cluster --cni cilium --workers 2 2>&1  2.45s user 1.30s system 4% cpu 1:30.45 total
+
+$ cilium status --wait
+    /¯¯\
+ /¯¯\__/¯¯\    Cilium:             OK
+ \__/¯¯\__/    Operator:           OK
+ /¯¯\__/¯¯\    Envoy DaemonSet:    OK
+ \__/¯¯\__/    Hubble Relay:       OK
+    \__/       ClusterMesh:        disabled
+
+DaemonSet              cilium                   Desired: 3, Ready: 3/3, Available: 3/3
+DaemonSet              cilium-envoy             Desired: 3, Ready: 3/3, Available: 3/3
+Deployment             cilium-operator          Desired: 1, Ready: 1/1, Available: 1/1
+Deployment             hubble-relay             Desired: 1, Ready: 1/1, Available: 1/1
+Containers:            cilium                   Running: 3
+                       cilium-envoy             Running: 3
+                       cilium-operator          Running: 1
+                       clustermesh-apiserver    
+                       hubble-relay             Running: 1
+Cluster Pods:          12/12 managed by Cilium
+Helm chart version:    1.20.2
+Image versions         cilium             quay.io/cilium/cilium:v1.20.2@sha256:2939231d0d3e3ebddcd80fffa168b7ddcc78fdf0dc864d1c8c126ff523c54f01: 3
+                       cilium-envoy       quay.io/cilium/cilium-envoy:v1.37.6-1789133542-cbec91f666af0bf742da986d43832932dbb26b82@sha256:af7382699576b9e65e9184efa52eeca0b58aea70ad6e511bf260c91d9f740463: 3
+                       cilium-operator    quay.io/cilium/operator-generic:v1.20.2@sha256:64d8798350e8569b8e7622563fed6e44dce2625f311e4651b774816516c744fc: 1
+                       hubble-relay       quay.io/cilium/hubble-relay:v1.20.2@sha256:d309c977870e9dbede7122a10eee09a4c9d66685e8d52af62d9c3c113f815b0f: 1
+
+$ kubectl -n kube-system exec ds/cilium -c cilium-agent -- cilium-dbg status   # filtered
+KubeProxyReplacement:    True   [eth0     192.168.70.21 192.168.70.4 fda5:1388:7822:8111:5054:ff:fe07:9fb0 fe80::5054:ff:fe07:9fb0 (Direct Routing)]
+Routing:                 Network: Tunnel [vxlan]   Host: Legacy
+Masquerading:            IPTables [IPv4: Enabled, IPv6: Disabled]
+Hubble:                  Ok              Current/Max Flows: 4095/4095 (100.00%), Flows/s: 14.23   Metrics: Disabled
+
+$ kona ssh kona-worker-1 -- sh -c 'iptables-save | grep -c KUBE-SVC'   # no kube-proxy rules
+0
+
+$ cilium connectivity test
+...
+✅ [cilium-test-1] All 82 tests (712 actions) successful, 53 tests skipped, 0 scenarios skipped.
+
+$ hack/gate-pod2pod.sh kona-worker-1 kona-worker-2        # cross-node pod-to-pod
+NAME     READY   STATUS    RESTARTS   AGE   IP            NODE            NOMINATED NODE   READINESS GATES
+client   1/1     Running   0          3s    10.42.1.131   kona-worker-1   <none>           <none>
+server   1/1     Running   0          3s    10.42.2.76    kona-worker-2   <none>           <none>
+## kona-worker-1 -> kona-worker-2 pod IP 10.42.2.76 (ICMP)
+3 packets transmitted, 3 packets received, 0% packet loss
+round-trip min/avg/max = 1.123/1.605/2.290 ms
+## kona-worker-1 -> service server.kona-gate.svc (HTTP via ClusterIP)
+kona-ok
+```
+
+The first connectivity run failed one test out of 82. That run was on the kernel built before `CONFIG_INET_DIAG` was added:
+
+```text
+time=2026-09-27T21:54:30.314526667Z level=error msg="Unexpected error while probing kernel socket termination support.Will proceed with starting socket destroyer job but functionality may be degraded" module=agent.controlplane.loadbalancer-reconciler.socket-termination error="failed while iterating sockets: no such file or directory" (1 occurrences)
+time=2026-09-27T21:54:36.418620837Z level=error msg="Unexpected error while probing kernel socket termination support.Will proceed with starting socket destroyer job but functionality may be degraded" module=agent.controlplane.loadbalancer-reconciler.socket-termination error="failed while iterating sockets: no such file or directory" (1 occurrences)
+```
+
+This is a real gap: Cilium kube-proxy replacement needs `sock_diag` (`CONFIG_INET_DIAG`, `_UDP_DIAG`, `_DIAG_DESTROY`). It was added to `kernel/kona.config`, the kernel was rebuilt, and the new kernel's sha256 was pinned so `kona doctor` rejects the old one. After that, all tests pass (above).
+
+The 53 skipped tests are either marked unsafe by Cilium (they modify node state, 16), need optional features kona doesn't enable (ingress controller, egress gateway, encryption, L7 LB, …), or are version-gated. None are failures.
+
+### 2.2 kubeadm + Cilium: PASS
+
+kubeadm runs with `--skip-phases=addon/kube-proxy` and no flannel.
+
+```text
+$ time kona create cluster kadm --distro kubeadm --cni cilium --workers 2
+...
+✓ Cilium is healthy
+✓ Cluster "kadm" is ready
+./bin/kona create cluster kadm --distro kubeadm --cni cilium --workers 2 2>&1  3.00s user 1.65s system 4% cpu 1:51.60 total
+
+$ kubectl -n kube-system get ds
+NAME           DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR            AGE
+cilium         3         3         3       3            3           kubernetes.io/os=linux   92s
+cilium-envoy   3         3         3       3            3           kubernetes.io/os=linux   92s
+$ cilium-dbg status   # filtered
+KubeProxyReplacement:    True   [eth0     192.168.71.20 192.168.71.3 ... (Direct Routing)]
+Routing:                 Network: Tunnel [vxlan]   Host: Legacy
+Hubble:                  Ok              Current/Max Flows: 467/4095 (11.40%), Flows/s: 9.59   Metrics: Disabled
+
+$ cilium connectivity test
+...
+✅ [cilium-test-1] All 82 tests (708 actions) successful, 53 tests skipped, 0 scenarios skipped.
+
+$ hack/gate-pod2pod.sh kadm-worker-1 kadm-worker-2
+NAME     READY   STATUS    RESTARTS   AGE   IP             NODE            NOMINATED NODE   READINESS GATES
+client   1/1     Running   0          2s    10.244.1.157   kadm-worker-1   <none>           <none>
+server   1/1     Running   0          2s    10.244.2.170   kadm-worker-2   <none>           <none>
+## kadm-worker-1 -> kadm-worker-2 pod IP 10.244.2.170 (ICMP)
+3 packets transmitted, 3 packets received, 0% packet loss
+round-trip min/avg/max = 0.763/1.490/2.800 ms
+## kadm-worker-1 -> service server.kona-gate.svc (HTTP via ClusterIP)
+kona-ok
+```
+
+### 2.3 Default CNI regression after the mount-propagation change: PASS
+
+```text
+[k3s] round-trip min/avg/max = 0.683/0.905/1.076 ms
+[k3s] ## reg-control-plane-1 -> service server.kona-gate.svc (HTTP via ClusterIP)
+[k3s] kona-ok
+[kubeadm] round-trip min/avg/max = 0.697/0.826/1.011 ms
+[kubeadm] ## reg-control-plane-1 -> service server.kona-gate.svc (HTTP via ClusterIP)
+[kubeadm] kona-ok
+```
+
+### 2.4 Cross-node pod-to-pod between GPU and CPU nodes: DEFERRED to Phase 3
+
+GPU (krunkit) nodes don't exist before Phase 3. This part of the Phase 2 gate will be run and recorded there, over the WireGuard link described in [networking.md](networking.md).
