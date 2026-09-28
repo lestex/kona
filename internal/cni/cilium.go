@@ -3,11 +3,15 @@
 package cni
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/lestex/kona/internal/state"
 	"github.com/lestex/kona/internal/version"
 )
+
+// GPUPodMTU fits VXLAN inside WireGuard (1420 - 50).
+const GPUPodMTU = 1370
 
 // CiliumVersion is the pinned Cilium release without the leading "v".
 func CiliumVersion() string { return strings.TrimPrefix(version.Get("CILIUM_VERSION"), "v") }
@@ -37,6 +41,11 @@ func CiliumInstallArgs(c *state.Cluster, kubeconfig, context string) []string {
 		"--set", "operator.replicas=1",
 		"--set", "hubble.enabled=true",
 		"--set", "hubble.relay.enabled=true",
+	}
+	if len(c.GPUNodes()) > 0 {
+		// CPU<->GPU traffic crosses WireGuard (wg0 MTU 1420); VXLAN on top
+		// needs 50 more bytes.
+		args = append(args, "--set", "mtu="+strconv.Itoa(GPUPodMTU))
 	}
 	return args
 }

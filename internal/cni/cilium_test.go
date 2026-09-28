@@ -21,3 +21,15 @@ func TestCiliumInstallArgs(t *testing.T) {
 		t.Errorf("k3s in cilium mode uses containerd's default CNI paths: %s", a)
 	}
 }
+
+func TestCiliumMTUWithGPUNodes(t *testing.T) {
+	c := &state.Cluster{Name: "kona", Nodes: []state.Node{
+		{Name: "cp", Role: state.RoleControlPlane, IP: "192.168.70.10"}}}
+	if a := strings.Join(CiliumInstallArgs(c, "/kc", "x"), " "); strings.Contains(a, "mtu=") {
+		t.Fatalf("CPU-only cluster must keep auto MTU: %s", a)
+	}
+	c.Nodes = append(c.Nodes, state.Node{Name: "g", Role: state.RoleGPUWorker})
+	if a := strings.Join(CiliumInstallArgs(c, "/kc", "x"), " "); !strings.Contains(a, "mtu=1370") {
+		t.Fatalf("GPU cluster needs mtu=1370: %s", a)
+	}
+}
