@@ -155,13 +155,15 @@ func (r *Runtime) Start(ctx context.Context, n Node) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	vm, err := spawn(n.path("krunkit.log"), n.path("krunkit.log"), r.Krunkit,
+	vm, err := spawn(n.path("krunkit.out"), n.path("krunkit.out"), r.Krunkit,
 		"--cpus", strconv.Itoa(n.CPUs), "--memory", strconv.FormatInt(n.MemoryMiB, 10),
 		"--device", "virtio-blk,path="+n.Disk()+",format=raw",
 		"--device", "virtio-blk,path="+n.Seed()+",format=raw",
 		"--device", "virtio-net,type=unixgram,path="+n.sock()+",mac="+n.MAC,
 		"--device", "virtio-serial,logFilePath="+n.Console(),
 		"--restful-uri", "unix://"+n.api(),
+		// libkrun logs why the VMM stopped (guest shutdown vs error).
+		"--log-file", n.path("krunkit.log"), "--krun-log-level", "3",
 	)
 	if err != nil {
 		syscall.Kill(helper, syscall.SIGKILL)
