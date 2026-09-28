@@ -147,3 +147,39 @@ primary interface changes. `PersistentKeepalive=25` re-establishes the flow.
 kona's node agent treats a handshake older than 3 × keepalive as degraded and
 bounces the peer endpoint (`wg set ... endpoint`) to force a new flow.
 `kona get nodes` surfaces it.
+
+## CNI
+
+| `--cni` | k3s | kubeadm |
+|---|---|---|
+| `default` | k3s's built-in flannel (VXLAN, `--flannel-iface eth0`), plus kube-proxy | flannel v0.28.9 (embedded manifest, VXLAN), plus kube-proxy |
+| `cilium` | `--flannel-backend none --disable-network-policy --disable-kube-proxy` | `kubeadm init --skip-phases=addon/kube-proxy`, no flannel |
+
+Cilium (v1.20.2) is installed from the host by the pinned Cilium CLI
+(v0.20.1). kona downloads the CLI, verifies its sha256, and caches it under
+`~/Library/Application Support/kona/bin/`. Settings:
+
+- `kubeProxyReplacement=true`, with `k8sServiceHost` set to the first
+  control plane's static IP, since there's no kube-proxy to program the
+  `kubernetes` Service.
+- `routingMode=tunnel`, `tunnelProtocol=vxlan`. The tunnel keeps pod
+  routing independent of the underlay, which matters once CPU↔GPU traffic
+  crosses WireGuard in Phase 3.
+- `ipam.mode=kubernetes`: pod CIDRs come from the node objects (k3s
+  10.42.0.0/16, kubeadm 10.244.0.0/16).
+- Hubble with relay.
+- CNI paths are Cilium's defaults for both distros. With
+  `--flannel-backend none`, k3s leaves containerd on `/etc/cni/net.d` and
+  `/opt/cni/bin`.
+
+Install order: control plane → API ready → Cilium → remaining nodes → all
+Ready → `cilium status --wait`. Nodes can't become Ready before the CNI runs.
+
+Node requirements Cilium surfaced (details in [failure-modes.md](failure-modes.md)):
+shared mount propagation for `/` and `/sys/fs/bpf` inside node VMs, and
+`CONFIG_INET_DIAG` + `CONFIG_INET_UDP_DIAG` + `CONFIG_INET_DIAG_DESTROY` in
+the guest kernel.
+
+Cilium 1.20 is e2e-tested on Kubernetes 1.33–1.36. kona's default 1.37 is
+outside that list, but the full `cilium connectivity test` passes on it for
+both distros ([gates.md](gates.md)).
