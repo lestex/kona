@@ -135,6 +135,8 @@ func (s *sim) runner() *execx.Fake {
 				return ok(`{"items":[` + strings.Join(items, ",") + `]}`)
 			case strings.HasPrefix(cmd, "cat "):
 				return ok(adminKubeconfig)
+			case strings.Contains(cmd, "get resourceslices --field-selector"):
+				return ok("resourceslice.resource.k8s.io/x")
 			case strings.HasSuffix(cmd, "get daemonset cilium"):
 				if !s.cilium {
 					return notFound()

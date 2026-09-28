@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/lestex/kona/deploy"
 	"github.com/lestex/kona/internal/distro"
@@ -79,6 +81,28 @@ func (m *Manager) deployVenusDRA(ctx context.Context, d distro.Distro, c *state.
 		"daemonset/kona-venus-dra", "--timeout=180s")...); err != nil {
 		return fmt.Errorf("kona-venus-dra did not become ready: %s (see `kubectl -n kona-system logs ds/kona-venus-dra`)", lastLine(err))
 	}
-	m.logf("✓ kona-venus-dra is running on %d GPU node(s)", len(nodes))
+	// A crash-looping plugin can pass the rollout check in its first
+	// seconds; a published ResourceSlice proves it registered and works.
+	for _, n := range nodes {
+		if err := m.waitResourceSlice(ctx, d, cp, n.Name); err != nil {
+			return err
+		}
+	}
+	m.logf("✓ kona-venus-dra published the Venus device on %d GPU node(s)", len(nodes))
 	return nil
+}
+
+func (m *Manager) waitResourceSlice(ctx context.Context, d distro.Distro, cp, node string) error {
+	deadline := m.Now().Add(2 * time.Minute)
+	for m.Now().Before(deadline) {
+		out, err := m.Container.Exec(ctx, cp, d.Kubectl("get", "resourceslices",
+			"--field-selector", "spec.nodeName="+node, "-o", "name")...)
+		if err == nil && strings.TrimSpace(string(out)) != "" {
+			return nil
+		}
+		if err := m.Sleep(ctx, pollInterval); err != nil {
+			return err
+		}
+	}
+	return fmt.Errorf("kona-venus-dra published no ResourceSlice for %s (see `kubectl -n kona-system logs ds/kona-venus-dra`)", node)
 }
