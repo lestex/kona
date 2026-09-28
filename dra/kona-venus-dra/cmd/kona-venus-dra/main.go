@@ -61,13 +61,21 @@ func run(nodeName, cdiDir, kubeletDir string) error {
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 
+	// The helper does not create its socket directories.
+	pluginDir := filepath.Join(kubeletDir, "plugins", driver.DriverName)
+	for _, dir := range []string{pluginDir, filepath.Join(kubeletDir, "plugins_registry"), cdiDir} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return err
+		}
+	}
+
 	d := &driver.Driver{GPU: gpu, CDI: driver.CDI{Dir: cdiDir}, Cancel: cancel}
 	helper, err := kubeletplugin.Start(ctx, d,
 		kubeletplugin.DriverName(driver.DriverName),
 		kubeletplugin.NodeName(nodeName),
 		kubeletplugin.KubeClient(client),
 		kubeletplugin.RegistrarDirectoryPath(filepath.Join(kubeletDir, "plugins_registry")),
-		kubeletplugin.PluginDataDirectoryPath(filepath.Join(kubeletDir, "plugins", driver.DriverName)),
+		kubeletplugin.PluginDataDirectoryPath(pluginDir),
 		kubeletplugin.HealthService(false),
 	)
 	if err != nil {
