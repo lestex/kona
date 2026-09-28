@@ -1,0 +1,94 @@
+$ cat /etc/fedora-release; uname -r
+Fedora release 44 (Forty Four)
+6.19.10-300.fc44.aarch64
+$ rpm -q mesa-vulkan-drivers
+mesa-vulkan-drivers-25.3.6-102.fc44.aarch64
+$ ls -l /dev/dri
+total 0
+drwxr-xr-x. 2 root root         80 Sep 26 13:33 by-path
+crw-rw----. 1 root video  226,   0 Sep 26 13:33 card0
+crw-rw-rw-. 1 root render 226, 128 Sep 26 13:33 renderD128
+$ vulkaninfo --summary
+WARNING: [Loader Message] Code 0 : terminator_CreateInstance: Received return code -9 from call to vkCreateInstance in ICD /usr/lib64/libvulkan_dzn.so. Skipping this driver.
+'DISPLAY' environment variable not set... skipping surface info
+MESA: error: Opening /dev/dri/card0 failed: Permission denied
+could not connect vdrm
+Error opening virtio-gpu device for Asahi native context
+WARNING: [Loader Message] Code 0 : ICD for selected physical device does not export vkGetPhysicalDeviceDisplayPlanePropertiesKHR!
+WARNING: [Loader Message] Code 0 : ICD for selected physical device does not export vkGetPhysicalDeviceDisplayPropertiesKHR!
+==========
+VULKANINFO
+==========
+
+Vulkan Instance Version: 1.4.341
+
+
+Instance Extensions: count = 25
+-------------------------------
+VK_EXT_acquire_drm_display             : extension revision 1
+VK_EXT_acquire_xlib_display            : extension revision 1
+VK_EXT_debug_report                    : extension revision 10
+VK_EXT_debug_utils                     : extension revision 2
+VK_EXT_direct_mode_display             : extension revision 1
+VK_EXT_display_surface_counter         : extension revision 1
+VK_EXT_headless_surface                : extension revision 1
+VK_EXT_layer_settings                  : extension revision 2
+VK_EXT_surface_maintenance1            : extension revision 1
+VK_EXT_swapchain_colorspace            : extension revision 5
+VK_KHR_device_group_creation           : extension revision 1
+VK_KHR_display                         : extension revision 23
+VK_KHR_external_fence_capabilities     : extension revision 1
+VK_KHR_external_memory_capabilities    : extension revision 1
+VK_KHR_external_semaphore_capabilities : extension revision 1
+VK_KHR_get_display_properties2         : extension revision 1
+VK_KHR_get_physical_device_properties2 : extension revision 2
+VK_KHR_get_surface_capabilities2       : extension revision 1
+VK_KHR_portability_enumeration         : extension revision 1
+VK_KHR_surface                         : extension revision 25
+VK_KHR_surface_protected_capabilities  : extension revision 1
+VK_KHR_wayland_surface                 : extension revision 6
+VK_KHR_xcb_surface                     : extension revision 6
+VK_KHR_xlib_surface                    : extension revision 6
+VK_LUNARG_direct_driver_loading        : extension revision 1
+
+Instance Layers: count = 1
+--------------------------
+VK_LAYER_MESA_device_select Linux device selection layer 1.4.303  version 1
+
+Devices:
+========
+GPU0:
+	apiVersion         = 1.2.0
+	driverVersion      = 25.3.6
+	vendorID           = 0x106b
+	deviceID           = 0x1a060209
+	deviceType         = PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU
+	deviceName         = Virtio-GPU Venus (Apple M3 Pro)
+	driverID           = DRIVER_ID_MESA_VENUS
+	driverName         = venus
+	driverInfo         = Mesa 25.3.6
+	conformanceVersion = 1.4.0.0
+	deviceUUID         = 292174f7-f58e-bcdb-5428-6d869abed553
+	driverUUID         = 50f74952-8719-d465-f68a-8256dca047a7
+GPU1:
+	apiVersion         = 1.4.328
+	driverVersion      = 25.3.6
+	vendorID           = 0x10005
+	deviceID           = 0x0000
+	deviceType         = PHYSICAL_DEVICE_TYPE_CPU
+	deviceName         = llvmpipe (LLVM 22.1.0, 128 bits)
+	driverID           = DRIVER_ID_MESA_LLVMPIPE
+	driverName         = llvmpipe
+	driverInfo         = Mesa 25.3.6 (LLVM 22.1.0)
+	conformanceVersion = 1.3.1.1
+	deviceUUID         = 6d657361-3235-2e33-2e36-000000000000
+	driverUUID         = 6c6c766d-7069-7065-5555-494400000000
+$ dmesg | grep drm
+[    2.338279] [drm] Host memory window: 0x180000000 +0x480000000
+[    2.338286] [drm] features: +virgl +edid +resource_blob +host_visible
+[    2.338287] [drm] features: +context_init
+[    2.338370] [drm] KMS disabled
+[    2.338372] [drm] number of cap sets: 5
+[    2.338664] [drm] cap set 0: id 1, max-version 1, max-size 308
+[    2.338686] [drm] cap set 1: id 2, max-version 2, max-size 1384
+[    2.338706] [drm] cap set 2: id 4, max-version 0, max-size 156

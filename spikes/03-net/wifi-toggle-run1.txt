@@ -1,0 +1,31 @@
+-- before (10:00:54)
+bridge100 bridge101 bridge102 
+host -> gpu0 192.168.65.10: ok
+host -> cpu1 static 192.168.66.200: ok
+gpu0 -> cpu1 over wg: ok
+cpu1 -> gpu0 over wg: ok
+cpu1 handshake: 
+cpu1 -> internet: ok
+== Wi-Fi off
+-- Wi-Fi off (10:01:02)
+bridge100 bridge101 bridge102 
+host -> gpu0 192.168.65.10: ok
+host -> cpu1 static 192.168.66.200: ok
+gpu0 -> cpu1 over wg: ok
+cpu1 -> gpu0 over wg: ok
+cpu1 handshake: 
+cpu1 -> internet: FAIL
+== Wi-Fi on
+-- Wi-Fi back (10:01:16)
+bridge100 bridge101 bridge102 
+host -> gpu0 192.168.65.10: ok
+host -> cpu1 static 192.168.66.200: ok
+gpu0 -> cpu1 over wg: FAIL
+cpu1 -> gpu0 over wg: FAIL
+cpu1 handshake: 
+cpu1 -> internet: ok
+# (run 1 used an earlier script revision: no recovery timer, and the
+#  handshake field was empty because busybox awk lacks systime().)
+# Manual recheck ~40s later:
+after +40s: gpu0->cpu1 ok
+cpu1 handshake age: 68s
