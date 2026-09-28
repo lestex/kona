@@ -7,3 +7,4 @@
 *.tar.xz
 spikes/**/work/
 kernel/out/
+images/gpu-node/out/
