@@ -45,3 +45,14 @@ func TestMACStableAndLocal(t *testing.T) {
 		t.Fatalf("MAC not stable/unique: %s %s", a, MAC("kona", "kona-worker-2"))
 	}
 }
+
+func TestGPUWorkerIPAndPorts(t *testing.T) {
+	g, err := GPUWorkerIP(netip.MustParsePrefix("192.168.71.0/24"), 2)
+	if err != nil || g.String() != "192.168.71.11" {
+		t.Fatalf("GPUWorkerIP = %s, %v", g, err)
+	}
+	ports, err := PickPorts(3, map[int]bool{51820: true}, func(p int) bool { return p != 51822 })
+	if err != nil || len(ports) != 3 || ports[0] != 51821 || ports[1] != 51823 || ports[2] != 51824 {
+		t.Fatalf("PickPorts = %v, %v", ports, err)
+	}
+}
