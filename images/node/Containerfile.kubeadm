@@ -54,8 +54,8 @@ COPY kubeadm/ /
 RUN systemctl enable containerd kubelet \
  && printf 'runtime-endpoint: unix:///run/containerd/containerd.sock\n' > /etc/crictl.yaml
 
-COPY kona-node /usr/local/bin/kona-node
-RUN chmod 0755 /usr/local/bin/kona-node
+COPY kona-node kona-wg /usr/local/bin/
+RUN chmod 0755 /usr/local/bin/kona-node /usr/local/bin/kona-wg
 ENV KONA_INIT=systemd container=oci
 STOPSIGNAL SIGRTMIN+3
 ENTRYPOINT ["/usr/local/bin/kona-node"]

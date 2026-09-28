@@ -86,6 +86,9 @@ if ! mountpoint -q /sys/fs/bpf; then
 fi
 mount --make-shared /sys/fs/bpf
 
+# WireGuard link to GPU nodes, if kona configured one before a restart.
+/usr/local/bin/kona-wg || log "kona-wg failed; GPU nodes may be unreachable"
+
 sysctl -qw net.ipv4.ip_forward=1
 sysctl -qw net.bridge.bridge-nf-call-iptables=1
 sysctl -qw net.bridge.bridge-nf-call-ip6tables=1
