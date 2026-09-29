@@ -211,6 +211,12 @@ func (c *Client) Run(ctx context.Context, s RunSpec) error {
 	return err
 }
 
+// Start boots a stopped container.
+func (c *Client) Start(ctx context.Context, name string) error {
+	_, err := c.run(ctx, "start", name)
+	return err
+}
+
 // Exec runs a command in a running container and returns stdout.
 func (c *Client) Exec(ctx context.Context, name string, cmd ...string) ([]byte, error) {
 	return c.run(ctx, append([]string{"exec", name}, cmd...)...)

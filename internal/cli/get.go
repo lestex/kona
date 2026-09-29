@@ -45,8 +45,11 @@ func newGetClustersCmd(g *globals) *cobra.Command {
 				return err
 			}
 			for _, i := range infos {
-				if i.Status == cluster.StatusOrphan {
+				switch {
+				case i.Status == cluster.StatusOrphan:
 					fmt.Fprintf(cmd.ErrOrStderr(), "! %q has VMs/volumes but no state; remove with: kona delete cluster %s\n", i.Name, i.Name)
+				case i.Status == cluster.StatusDegraded && i.Phase == "ready":
+					fmt.Fprintf(cmd.ErrOrStderr(), "! %q has stopped nodes; bring them back with: kona start cluster %s\n", i.Name, i.Name)
 				}
 			}
 			return nil

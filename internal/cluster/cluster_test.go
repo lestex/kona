@@ -515,3 +515,23 @@ func TestVenusDevice(t *testing.T) {
 		t.Fatalf("llvmpipe detected as Venus: %q", d)
 	}
 }
+
+func TestStartRestartsDeadGPUNode(t *testing.T) {
+	m, _, o := gpuSetup(t, true)
+	t.Cleanup(func() { m.Delete(context.Background(), "kona") })
+	if err := m.Create(context.Background(), o); err != nil {
+		t.Fatal(err)
+	}
+	c := mustLoad(t, m, "kona")
+	kn := m.krunkitNode(c, c.GPUNodes()[0])
+	m.GPU.Stop(context.Background(), kn) // "lost to host sleep"
+	if m.GPU.Running(kn) {
+		t.Fatal("precondition: GPU VM should be stopped")
+	}
+	if err := m.Start(context.Background(), "kona", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if !m.GPU.Running(kn) {
+		t.Fatal("Start did not boot the GPU VM")
+	}
+}
