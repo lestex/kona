@@ -1,0 +1,12 @@
+# Vulkan compute smoke test on top of kona-vulkan.
+ARG VULKAN_IMAGE
+FROM ${VULKAN_IMAGE} AS build
+RUN dnf -y install --setopt=install_weak_deps=False gcc vulkan-loader-devel glslc && dnf clean all
+COPY vkcompute.c double.comp /src/
+RUN glslc -O /src/double.comp -o /src/double.spv \
+ && gcc -O2 -Wall -Werror -o /src/vkcompute /src/vkcompute.c -lvulkan
+
+FROM ${VULKAN_IMAGE}
+COPY --from=build /src/vkcompute /usr/local/bin/vkcompute
+COPY --from=build /src/double.spv /usr/local/share/kona/double.spv
+ENTRYPOINT ["/usr/local/bin/vkcompute"]
