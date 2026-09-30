@@ -25,7 +25,6 @@ import (
 	"github.com/lestex/kona/internal/runtime/krunkit"
 	"github.com/lestex/kona/internal/state"
 	"github.com/lestex/kona/internal/tools"
-	"github.com/lestex/kona/internal/wg"
 )
 
 const (
@@ -49,6 +48,8 @@ type Manager struct {
 	GPU *krunkit.Runtime
 	// PortFree reports whether a host UDP port can be published (tests).
 	PortFree func(int) bool
+	// StartRelay starts a CPU node's WireGuard relay (nil: `kona wg-relay`).
+	StartRelay func(c *state.Cluster, n state.Node) error
 	// ImportImage loads a local image into a GPU node (nil: via SSH).
 	ImportImage func(ctx context.Context, c *state.Cluster, n state.Node, image string) error
 	Log         io.Writer
@@ -488,15 +489,11 @@ func (m *Manager) ensureNode(ctx context.Context, d distro.Distro, c *state.Clus
 	for k, v := range spec.Env {
 		env[k] = v
 	}
-	var publish []string
-	if n.WGPort != 0 {
-		publish = []string{fmt.Sprintf("%d:%d/udp", n.WGPort, wg.ListenPort)}
-	}
 	m.logf("• Starting %s (%s, %d CPU, %s)", n.Name, n.IP, n.CPUs, n.Memory)
 	if err := m.Container.Run(ctx, container.RunSpec{
 		Name: n.Name, Init: spec.UseInit, Tmpfs: spec.Tmpfs, Image: c.Image, Kernel: c.Kernel,
 		Network: c.Network.Name, MAC: n.MAC, MTU: nodeMTU, DNS: c.DNS, CPUs: n.CPUs, Memory: n.Memory,
-		Env: env, Labels: labels, Volumes: vols, Args: spec.Args, Publish: publish,
+		Env: env, Labels: labels, Volumes: vols, Args: spec.Args,
 	}); err != nil {
 		return err
 	}
@@ -630,6 +627,9 @@ func (m *Manager) Delete(ctx context.Context, name string) error {
 			m.logf("• Deleting GPU node %s", n.Name)
 			errs = append(errs, m.GPU.Delete(ctx, m.krunkitNode(c, n)))
 		}
+	}
+	if n := stopRelays(name); n > 0 {
+		m.logf("• Stopped %d WireGuard relay(s)", n)
 	}
 	// Orphaned krunkit/vmnet-helper processes (state lost mid-create): their
 	// command lines point into the cluster's state and socket dirs.
