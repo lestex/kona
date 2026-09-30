@@ -88,8 +88,8 @@ func (m *Manager) saveSecrets(cluster string, s distro.Secrets) error {
 }
 
 // wgConfigs returns every node's WireGuard config: CPU nodes peer with all
-// GPU nodes (endpoints learned), GPU nodes dial each CPU node's relay port
-// at their own vmnet gateway (the host).
+// GPU nodes (endpoints learned), GPU nodes dial each CPU node's published
+// port at their own vmnet gateway.
 func (m *Manager) wgConfigs(c *state.Cluster, s distro.Secrets) (map[string]wg.Config, error) {
 	pub := map[string]string{}
 	priv := map[string]string{}
@@ -116,7 +116,7 @@ func (m *Manager) wgConfigs(c *state.Cluster, s distro.Secrets) (map[string]wg.C
 		cfg := wg.Config{PrivateKey: priv[g.Name], Routes: []string{c.Network.Subnet}}
 		for _, cpu := range c.CPUNodes() {
 			if cpu.WGPort == 0 {
-				return nil, fmt.Errorf("node %s has no WireGuard relay port: cluster %q predates GPU support; recreate it", cpu.Name, c.Name)
+				return nil, fmt.Errorf("node %s has no published WireGuard port: cluster %q predates GPU support; recreate it", cpu.Name, c.Name)
 			}
 			cfg.Peers = append(cfg.Peers, wg.Peer{Name: cpu.Name, PublicKey: pub[cpu.Name], IP: cpu.IP,
 				Endpoint: fmt.Sprintf("%s:%d", c.GPUNetwork.Gateway, cpu.WGPort)})
@@ -253,9 +253,6 @@ func (m *Manager) startGPUNodes(ctx context.Context, c *state.Cluster, s distro.
 		return err
 	}
 	m.logf("• Linking %s and GPU network %s over WireGuard", c.Network.Subnet, c.GPUNetwork.Subnet)
-	if err := m.ensureRelays(c); err != nil {
-		return err
-	}
 	if err := m.syncCPUWireGuard(ctx, c, cfgs); err != nil {
 		return err
 	}

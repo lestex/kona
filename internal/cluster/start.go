@@ -62,11 +62,6 @@ func (m *Manager) Start(ctx context.Context, name string, wait time.Duration) er
 			started++
 		}
 	}
-	if len(c.GPUNodes()) > 0 {
-		if err := m.ensureRelays(c); err != nil {
-			return err
-		}
-	}
 	if started == 0 {
 		m.logf("✓ All nodes of %q are already running", name)
 		return nil

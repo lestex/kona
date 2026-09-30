@@ -395,7 +395,6 @@ func gpuSetup(t *testing.T, venus bool) (*Manager, *sim, CreateOptions) {
 		VmnetHelper:   script("vmnet-helper", `echo '{"vmnet_mtu":1500}'; exec sleep 30`),
 		HelperTimeout: 5 * time.Second, StopGrace: 200 * time.Millisecond}
 	m.PortFree = func(int) bool { return true }
-	m.StartRelay = func(*state.Cluster, state.Node) error { return nil }
 	var imported []string
 	m.ImportImage = func(_ context.Context, _ *state.Cluster, n state.Node, image string) error {
 		imported = append(imported, n.Name+" "+image)
@@ -441,12 +440,8 @@ func TestCreateWithGPUWorker(t *testing.T) {
 		ports[n.WGPort] = true
 	}
 	joined := strings.Join(calls, "\n")
-	if strings.Contains(joined, ":51820/udp") {
-		t.Fatal("CPU nodes must not use `container run -p` for WireGuard (the host relay carries it)")
-	}
-	if a := strings.Join(RelayArgs("kona", c.ControlPlanes()[0]), " "); a != fmt.Sprintf(
-		"wg-relay --cluster=kona --node=kona-control-plane-1 --listen=0.0.0.0:%d --target=192.168.70.10:51820", c.ControlPlanes()[0].WGPort) {
-		t.Fatalf("relay args: %s", a)
+	if !strings.Contains(joined, fmt.Sprintf("-p %d:51820/udp", c.ControlPlanes()[0].WGPort)) {
+		t.Fatal("control plane does not publish its WireGuard port")
 	}
 	if !strings.Contains(joined, "exec kona-worker-2 /usr/local/bin/kona-wg") {
 		t.Fatal("CPU nodes were not given the WireGuard config")
