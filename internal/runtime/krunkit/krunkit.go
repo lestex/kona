@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/lestex/kona/internal/procx"
 )
 
 // Node describes one krunkit VM.
@@ -224,17 +226,7 @@ func KillMatching(substr string) []int {
 	return pids
 }
 
-func (r *Runtime) killPidfile(path string) {
-	pid, ok := readPid(path)
-	if ok && alive(pid, "") {
-		syscall.Kill(pid, syscall.SIGTERM)
-		if !waitGone(pid, 2*time.Second) {
-			syscall.Kill(pid, syscall.SIGKILL) // hung helpers ignore SIGTERM
-			waitGone(pid, 2*time.Second)
-		}
-	}
-	os.Remove(path)
-}
+func (r *Runtime) killPidfile(path string) { procx.KillPidfile(path) }
 
 func stopViaAPI(ctx context.Context, sock string) {
 	c := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{
@@ -251,71 +243,17 @@ func stopViaAPI(ctx context.Context, sock string) {
 	}
 }
 
-// spawn starts a detached process (own session, stdin from /dev/null).
 func spawn(stdout, stderr, name string, args ...string) (int, error) {
-	out, err := os.OpenFile(stdout, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return 0, err
-	}
-	defer out.Close()
-	errf := out
-	if stderr != stdout {
-		if errf, err = os.OpenFile(stderr, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600); err != nil {
-			return 0, err
-		}
-		defer errf.Close()
-	}
-	cmd := exec.Command(name, args...)
-	cmd.Stdout, cmd.Stderr = out, errf
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := cmd.Start(); err != nil {
-		return 0, err
-	}
-	pid := cmd.Process.Pid
-	return pid, cmd.Process.Release()
+	return procx.Spawn(stdout, stderr, name, args...)
 }
 
-func writePid(path string, pid int) error {
-	return os.WriteFile(path, []byte(strconv.Itoa(pid)+"\n"), 0o600)
-}
+func writePid(path string, pid int) error { return procx.WritePid(path, pid) }
 
-func readPid(path string) (int, bool) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return 0, false
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
-	return pid, err == nil && pid > 0
-}
+func readPid(path string) (int, bool) { return procx.ReadPid(path) }
 
-// alive reports whether pid exists and, if comm is set, runs that program
-// (guards against pid reuse after a reboot).
-func alive(pid int, comm string) bool {
-	if syscall.Kill(pid, 0) != nil {
-		return false
-	}
-	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "stat=,command=").Output()
-	if err != nil {
-		return false
-	}
-	fields := strings.Fields(string(out))
-	// A killed process that nobody reaped yet (zombie) is gone for us.
-	if len(fields) == 0 || strings.HasPrefix(fields[0], "Z") {
-		return false
-	}
-	return comm == "" || strings.Contains(string(out), comm)
-}
+func alive(pid int, match string) bool { return procx.Alive(pid, match) }
 
-func waitGone(pid int, d time.Duration) bool {
-	deadline := time.Now().Add(d)
-	for time.Now().Before(deadline) {
-		if !alive(pid, "") {
-			return true
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return !alive(pid, "")
-}
+func waitGone(pid int, d time.Duration) bool { return procx.WaitGone(pid, d) }
 
 func uuid() string {
 	var b [16]byte
