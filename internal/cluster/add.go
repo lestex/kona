@@ -90,6 +90,9 @@ func (m *Manager) AddNode(ctx context.Context, o AddOptions) error {
 			return err
 		}
 		if len(c.GPUNodes()) > 0 {
+			if err := m.ensureRelays(c); err != nil {
+				return err
+			}
 			if err := m.relinkAll(ctx, c, s); err != nil {
 				return err
 			}
