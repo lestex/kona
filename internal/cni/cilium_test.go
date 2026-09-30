@@ -30,7 +30,7 @@ func TestCiliumMTUWithGPUNodes(t *testing.T) {
 	}
 	c.Nodes = append(c.Nodes, state.Node{Name: "g", Role: state.RoleGPUWorker})
 	// Upper-case MTU is the chart key (values.yaml: "MTU: 0").
-	if a := strings.Join(CiliumInstallArgs(c, "/kc", "x"), " "); !strings.Contains(a, "--set MTU=1370") {
-		t.Fatalf("GPU cluster needs --set MTU=1370: %s", a)
+	if a := strings.Join(CiliumInstallArgs(c, "/kc", "x"), " "); !strings.Contains(a, "--set MTU=1420") {
+		t.Fatalf("GPU cluster needs --set MTU=1420 (wg0's MTU): %s", a)
 	}
 }

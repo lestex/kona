@@ -10,11 +10,13 @@ import (
 	"github.com/lestex/kona/internal/version"
 )
 
-// GPUPodMTU fits a VXLAN packet (+50 bytes) inside WireGuard's 1420-byte
-// wg0 once GPU nodes exist. Observed on Cilium 1.20: the Helm value MTU is
-// applied to pod interfaces as-is (MTU=1420 gave pods 1420, whose VXLAN
-// packets are 1470 and fragment on wg0), so kona passes the pod MTU.
-const GPUPodMTU = 1370
+// GPUUnderlayMTU is the smallest underlay MTU once GPU nodes exist: the
+// WireGuard link (wg0, 1420). The Cilium chart's MTU value is the underlay
+// MTU; Cilium keeps the VXLAN overhead (50 bytes) off the pod path itself.
+// Measured with DF pings CPU pod -> GPU pod: MTU=1420 passes 1370-byte
+// packets and refuses 1380 (pod eth0 still shows 1420); MTU=1370 only
+// passes 1320. So 1420 is exact, and anything larger fragments on wg0.
+const GPUUnderlayMTU = 1420
 
 // CiliumVersion is the pinned Cilium release without the leading "v".
 func CiliumVersion() string { return strings.TrimPrefix(version.Get("CILIUM_VERSION"), "v") }
@@ -48,7 +50,7 @@ func CiliumInstallArgs(c *state.Cluster, kubeconfig, context string) []string {
 	if len(c.GPUNodes()) > 0 {
 		// CPU<->GPU traffic crosses WireGuard (wg0, MTU 1420). The chart key
 		// is upper-case MTU; a lower-case "mtu" is silently ignored.
-		args = append(args, "--set", "MTU="+strconv.Itoa(GPUPodMTU))
+		args = append(args, "--set", "MTU="+strconv.Itoa(GPUUnderlayMTU))
 	}
 	return args
 }

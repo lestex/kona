@@ -190,8 +190,8 @@ func (m *Manager) lowerCiliumMTU(ctx context.Context, c *state.Cluster) error {
 	if err != nil {
 		return err
 	}
-	m.logf("• Setting the Cilium pod MTU to %d for the WireGuard link (pods started earlier keep their MTU until restarted)", cni.GPUPodMTU)
+	m.logf("• Setting Cilium's underlay MTU to %d for the WireGuard link (pods started earlier keep their MTU until restarted)", cni.GPUUnderlayMTU)
 	_, err = m.ciliumRunner().Run(ctx, cli, "upgrade", "--kubeconfig", kc, "--context", kubeconfig.ContextName(c.Name),
-		"--version", cni.CiliumVersion(), "--reuse-values", "--set", "MTU="+strconv.Itoa(cni.GPUPodMTU))
+		"--version", cni.CiliumVersion(), "--reuse-values", "--set", "MTU="+strconv.Itoa(cni.GPUUnderlayMTU))
 	return err
 }
