@@ -75,9 +75,12 @@ type Cluster struct {
 	// GPUNetwork is the vmnet-helper network krunkit GPU nodes share. It is
 	// separate from Network because vmnet refuses to put a second network
 	// on a `container` network's subnet (docs/networking.md).
-	GPUNetwork Network   `json:"gpuNetwork,omitzero"`
-	Nodes      []Node    `json:"nodes"`
-	CreatedAt  time.Time `json:"createdAt"`
+	GPUNetwork Network `json:"gpuNetwork,omitzero"`
+	// GPULinkMode is how GPU nodes reach CPU nodes' WireGuard ports
+	// (GPULinkRelay or GPULinkPublish); empty means relay.
+	GPULinkMode string    `json:"gpuLink,omitempty"`
+	Nodes       []Node    `json:"nodes"`
+	CreatedAt   time.Time `json:"createdAt"`
 }
 
 // ControlPlanes returns the control-plane nodes in order.
@@ -91,6 +94,24 @@ func (c *Cluster) byRole(role string) []Node {
 		}
 	}
 	return out
+}
+
+// GPU link modes: how WireGuard packets from GPU nodes reach CPU nodes.
+const (
+	// GPULinkRelay: a kona-run UDP relay per CPU node on the host.
+	GPULinkRelay = "relay"
+	// GPULinkPublish: `container run -p` on each CPU node. Needs the
+	// container runtime to hold macOS Local Network permission, which
+	// Homebrew's ad-hoc-signed builds cannot keep (docs/failure-modes.md).
+	GPULinkPublish = "publish"
+)
+
+// GPULink returns the cluster's GPU link mode (relay when unset).
+func (c *Cluster) GPULink() string {
+	if c.GPULinkMode == "" {
+		return GPULinkRelay
+	}
+	return c.GPULinkMode
 }
 
 // GPUNodes returns the krunkit GPU worker nodes in order.

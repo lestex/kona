@@ -72,6 +72,7 @@ func newCreateClusterCmd(g *globals) *cobra.Command {
 	f.IntVar(&o.GPUWorkers, "gpu-workers", 0, "number of krunkit GPU worker nodes (Vulkan via Venus; --distro k3s)")
 	f.IntVar(&o.GPUCPUs, "gpu-cpus", 4, "vCPUs per GPU node")
 	f.StringVar(&o.GPUMemory, "gpu-memory", "4G", "fixed memory per GPU node")
+	f.StringVar(&o.GPULink, "gpu-link", "relay", "how GPU nodes reach CPU nodes' WireGuard: relay (kona host relay) | publish (container run -p; needs Apple's signed container)")
 	f.StringVar(&o.GPUImage, "gpu-image", "", "GPU node disk image (default: the installed kona-gpu-node image)")
 	f.StringVar(&o.Distro, "distro", "k3s", "Kubernetes distribution: k3s|kubeadm")
 	f.StringVar(&o.CNI, "cni", "default", "CNI: default|cilium")

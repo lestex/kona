@@ -25,6 +25,7 @@ import (
 	"github.com/lestex/kona/internal/runtime/krunkit"
 	"github.com/lestex/kona/internal/state"
 	"github.com/lestex/kona/internal/tools"
+	"github.com/lestex/kona/internal/wg"
 )
 
 const (
@@ -85,6 +86,8 @@ type CreateOptions struct {
 	GPUWorkers    int
 	GPUCPUs       int
 	GPUMemory     string
+	// GPULink is state.GPULinkRelay (default) or state.GPULinkPublish.
+	GPULink string
 	// GPUImage is the krunkit GPU node disk image (raw).
 	GPUImage   string
 	Distro     string
@@ -296,6 +299,11 @@ func validate(o CreateOptions) error {
 			return err
 		}
 	}
+	switch o.GPULink {
+	case "", state.GPULinkRelay, state.GPULinkPublish:
+	default:
+		return fmt.Errorf("unknown --gpu-link %q (want relay or publish)", o.GPULink)
+	}
 	switch o.CNI {
 	case "", "default", "cilium":
 	default:
@@ -327,7 +335,7 @@ func (m *Manager) plan(ctx context.Context, o CreateOptions) (*state.Cluster, er
 		return nil, err
 	}
 	c := &state.Cluster{
-		Name: o.Name, Distro: o.Distro, CNI: cniName(o.CNI), K8sVersion: o.K8sVersion,
+		Name: o.Name, Distro: o.Distro, CNI: cniName(o.CNI), K8sVersion: o.K8sVersion, GPULinkMode: o.GPULink,
 		Image: o.Image, Kernel: o.Kernel, DNS: o.DNS, Phase: state.PhaseCreating,
 		Network: state.Network{Name: NetworkName(o.Name), Subnet: subnet.String(),
 			Gateway: netplan.Gateway(subnet).String(), Prefix: netplan.Prefix},
@@ -489,11 +497,15 @@ func (m *Manager) ensureNode(ctx context.Context, d distro.Distro, c *state.Clus
 	for k, v := range spec.Env {
 		env[k] = v
 	}
+	var publish []string
+	if c.GPULink() == state.GPULinkPublish && n.WGPort != 0 {
+		publish = []string{fmt.Sprintf("%d:%d/udp", n.WGPort, wg.ListenPort)}
+	}
 	m.logf("• Starting %s (%s, %d CPU, %s)", n.Name, n.IP, n.CPUs, n.Memory)
 	if err := m.Container.Run(ctx, container.RunSpec{
 		Name: n.Name, Init: spec.UseInit, Tmpfs: spec.Tmpfs, Image: c.Image, Kernel: c.Kernel,
 		Network: c.Network.Name, MAC: n.MAC, MTU: nodeMTU, DNS: c.DNS, CPUs: n.CPUs, Memory: n.Memory,
-		Env: env, Labels: labels, Volumes: vols, Args: spec.Args,
+		Env: env, Labels: labels, Volumes: vols, Args: spec.Args, Publish: publish,
 	}); err != nil {
 		return err
 	}

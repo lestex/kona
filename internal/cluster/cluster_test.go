@@ -540,3 +540,35 @@ func TestStartRestartsDeadGPUNode(t *testing.T) {
 		t.Fatal("Start did not boot the GPU VM")
 	}
 }
+
+func TestGPULinkModes(t *testing.T) {
+	for _, mode := range []string{"", state.GPULinkRelay, state.GPULinkPublish} {
+		t.Run("mode="+mode, func(t *testing.T) {
+			m, _, o := gpuSetup(t, true)
+			t.Cleanup(func() { m.Delete(context.Background(), "kona") })
+			var relays []string
+			m.StartRelay = func(_ *state.Cluster, n state.Node) error {
+				relays = append(relays, n.Name)
+				return nil
+			}
+			o.GPULink = mode
+			if err := m.Create(context.Background(), o); err != nil {
+				t.Fatal(err)
+			}
+			published := strings.Contains(strings.Join(m.Container.Runner.(*execx.Fake).Calls, "\n"), ":51820/udp")
+			if mode == state.GPULinkPublish {
+				if !published || len(relays) != 0 {
+					t.Fatalf("publish mode: published=%v relays=%v", published, relays)
+				}
+				return
+			}
+			// relay is the default
+			if published || len(relays) != 3 {
+				t.Fatalf("relay mode: published=%v relays=%v", published, relays)
+			}
+			if c := mustLoad(t, m, "kona"); c.GPULink() != state.GPULinkRelay {
+				t.Fatalf("stored link %q", c.GPULink())
+			}
+		})
+	}
+}

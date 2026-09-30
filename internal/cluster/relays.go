@@ -26,6 +26,9 @@ func RelayArgs(cluster string, n state.Node) []string {
 // ensureRelays runs one host UDP relay per CPU node, carrying WireGuard from
 // GPU nodes (which dial <gpu gateway>:<WGPort>) to the node's static IP.
 func (m *Manager) ensureRelays(c *state.Cluster) error {
+	if c.GPULink() != state.GPULinkRelay {
+		return nil
+	}
 	start := m.StartRelay
 	if start == nil {
 		start = m.startRelay
