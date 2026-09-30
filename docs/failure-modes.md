@@ -12,6 +12,8 @@ required by the brief. Each lists how it shows up and what kona does about it.
 | vmnet gateway DNS forwarder refuses queries | `Temporary failure resolving …` in nodes and builds | kona passes the host's primary resolver explicitly (`--dns`) and never relies on 192.168.x.1:53. |
 | Stale negative DNS cache on macOS (`github.com` unresolvable, public resolvers fine) | `curl: (6) Could not resolve host` for host-side downloads | Tool downloads fail loudly with the URL. Checksum pinning (`hack/pin-checksums.sh`) aborts on any failed lookup instead of writing empty pins. Fix: `sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder`, or run the script in a container. |
 | User's Helm setup (repos, caches) | `cilium install` failed: `no cached repo found … az-index.yaml` | The Cilium CLI runs with `HELM_*` pointed at `~/Library/Application Support/kona/helm/`. kona never reads or changes the user's Helm config. |
+| `container` upgraded (e.g. 1.4.1 → 1.5.0 by `brew upgrade`) | Its services restart and **stop every VM**. Afterwards `--publish` fails with `connect failed … No route to host` (EHOSTUNREACH) while the container IP works directly (apple/container#2067). The new binaries need the macOS **Local Network** privacy permission again, and kona's GPU↔CPU WireGuard link depends on published UDP ports | `kona get clusters` shows `degraded` and suggests `kona start cluster`. Approve the Local Network prompt (System Settings → Privacy & Security → Local Network → enable `container`), then run `kona start cluster`. The version kona is tested with is pinned in `versions.env`. |
+| Host sleep | `container` VMs survived an overnight idle-sleep cycle, but the krunkit GPU VM and its vmnet-helper did not; both were gone with no log line and no crash report. The cause is not yet known | `kona start cluster` boots it again from its disk. Its configuration (static IP, WireGuard, k3s) is on the disk, so it rejoins. |
 | deprecated `slp/krunkit` tap | krunkit stuck on 1.1.1 | `kona doctor` detects it and prints the migration commands to `libkrun/krun`. |
 
 ## Node VMs (Apple `container`)
@@ -23,7 +25,8 @@ required by the brief. Each lists how it shows up and what kona does about it.
 | Private mount propagation (all mounts start `private`; systemd in a container doesn't `make-rshared`) | Cilium: `path "/sys/fs/bpf" is mounted on "/sys" but it is not a shared mount` | The entrypoint runs `mount --make-rshared /`, mounts bpffs on `/sys/fs/bpf`, and makes it shared, for both distros. |
 | Fresh ext4 volume has `lost+found` | kubeadm preflight: `/var/lib/etcd is not empty` | The etcd `dataDir` is `/var/lib/etcd/data`, a subdirectory of the block volume. |
 | Default container MTU 1280 | Fragmentation or drops for overlay traffic | Nodes run with `mtu=1500`. |
-| Guest clock drift after host sleep | Skewed timestamps and TLS/token errors | chrony runs with `makestep 1 -1`. `kona get nodes` shows skew per node. The sleep/wake test itself is still pending. |
+| Guest clock drift after host sleep | Skewed timestamps and TLS/token errors | chrony runs with `makestep 1 -1`. `kona get nodes` shows skew per node: after a real overnight sleep/wake cycle, skew was +0.06 s to +0.20 s. |
+| Host reboot, or `container` services restart | All `container` VMs stop, and krunkit VMs are gone | `kona start cluster` restarts control planes first, then workers and GPU nodes, and waits for Ready. Static IPs and WireGuard configs are reapplied from the node disks. |
 
 ## Lifecycle
 
