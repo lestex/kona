@@ -3,6 +3,7 @@
 # vmnet bridges, static addresses, published ports and the WireGuard path
 # survive. Disrupts host networking for ~15s; run only with consent.
 set -uo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
 source "$(dirname "$0")/lib.sh"
 CPU=cpu1
 wifi=${WIFI_IF:-en0}

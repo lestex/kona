@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # kona targets Apple silicon on macOS 26 (Tahoe); unit tests use fakes,
+    # so no `container`, krunkit or nested virtualization is needed here.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.sum"
+      - name: gofmt
+        run: |
+          unformatted=$(git ls-files '*.go' | xargs gofmt -l)
+          if [ -n "$unformatted" ]; then echo "gofmt needed:"; echo "$unformatted"; exit 1; fi
+      - name: vet and test every module
+        run: |
+          for mod in $(git ls-files 'go.mod' '**/go.mod'); do
+            dir=$(dirname "$mod")
+            echo "::group::$dir"
+            (cd "$dir" && go vet ./... && go test ./...)
+            echo "::endgroup::"
+          done
+      - name: build
+        run: make build && ./bin/kona version
+      - name: shellcheck
+        run: |
+          brew install shellcheck
+          git ls-files '*.sh' | xargs shellcheck -x -S warning
