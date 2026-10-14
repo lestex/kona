@@ -1,0 +1,56 @@
+# llama.cpp on the Venus GPU through DRA: benchmarks TinyLlama 1.1B (Q4_K_M)
+# on the GPU and on the CPU for comparison, then generates a short answer.
+# Build and load the image first (it bakes in the model, pinned by sha256):
+#   make -C examples/llama-vulkan image load
+#   kubectl apply -f examples/llama-vulkan/llama-vulkan.yaml
+#   kubectl logs -f job/llama-vulkan
+#
+# The claim takes 4Gi of the GPU's memory, so other claims can share it
+# (docs/gpu.md). `-ngl 99` offloads every layer to Vulkan.
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: kona-gpu-llama
+spec:
+  spec:
+    devices:
+      requests:
+        - name: gpu
+          exactly:
+            deviceClassName: kona-gpu
+            capacity:
+              requests:
+                memory: 4Gi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: llama-vulkan
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      tolerations:
+        - {key: kona.dev/gpu, operator: Exists, effect: NoSchedule}
+      resourceClaims:
+        - name: gpu
+          resourceClaimTemplateName: kona-gpu-llama
+      containers:
+        - name: llama
+          image: ghcr.io/lestex/kona-llama-vulkan:v0.6.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -ec
+            - |
+              echo "## llama-bench, GPU (Vulkan on Venus)"
+              llama-bench -m /models/model.gguf -ngl 99 -p 128 -n 32 -r 3
+              echo "## llama-bench, CPU only"
+              llama-bench -m /models/model.gguf -ngl 0 -p 128 -n 32 -r 3
+              echo "## completion on the GPU"
+              llama-completion -m /models/model.gguf -ngl 99 -no-cnv --temp 0 -n 48 \
+                -p "Q: What is Kubernetes, in one sentence? A:"
+          resources:
+            claims:
+              - name: gpu
