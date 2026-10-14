@@ -100,9 +100,8 @@ func (c *Cluster) byRole(role string) []Node {
 const (
 	// GPULinkRelay: a kona-run UDP relay per CPU node on the host.
 	GPULinkRelay = "relay"
-	// GPULinkPublish: `container run -p` on each CPU node. Needs the
-	// container runtime to hold macOS Local Network permission, which
-	// Homebrew's ad-hoc-signed builds cannot keep (docs/failure-modes.md).
+	// GPULinkPublish: `container run -p` on each CPU node, so the link
+	// depends on container's UDP port forwarder (docs/networking.md).
 	GPULinkPublish = "publish"
 )
 

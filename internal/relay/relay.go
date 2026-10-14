@@ -6,8 +6,9 @@
 // client's datagrams to the CPU node's static IP from a dedicated upstream
 // socket, so replies map back to the right client.
 //
-// kona used `container run -p` for this until container 1.5.0, whose
-// forwarder failed with EHOSTUNREACH after the upgrade (docs/failure-modes.md).
+// It is the default because it doesn't depend on container's port
+// forwarder, which broke for TCP on Homebrew's 1.5.0 build
+// (docs/failure-modes.md); `--gpu-link publish` uses that forwarder.
 // The relay runs as a detached child of kona, like vmnet-helper.
 package relay
 
