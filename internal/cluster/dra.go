@@ -22,12 +22,12 @@ func VulkanImage() string { return "ghcr.io/lestex/kona-vulkan:" + version.Get("
 // importImage copies a local `container` image into a GPU node's k3s
 // containerd over SSH. (Phase 4 replaces this with the kona-registry.)
 func (m *Manager) importImage(ctx context.Context, c *state.Cluster, n state.Node, image string) error {
-	tmp, err := os.CreateTemp(RunDir(c.Name), ".image-*.tar")
+	tmp, err := os.CreateTemp(m.RunDir(c.Name), ".image-*.tar")
 	if err != nil {
-		if err := os.MkdirAll(RunDir(c.Name), 0o700); err != nil {
+		if err := os.MkdirAll(m.RunDir(c.Name), 0o700); err != nil {
 			return err
 		}
-		if tmp, err = os.CreateTemp(RunDir(c.Name), ".image-*.tar"); err != nil {
+		if tmp, err = os.CreateTemp(m.RunDir(c.Name), ".image-*.tar"); err != nil {
 			return err
 		}
 	}

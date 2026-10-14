@@ -53,7 +53,12 @@ type Manager struct {
 	StartRelay func(c *state.Cluster, n state.Node) error
 	// ImportImage loads a local image into a GPU node (nil: via SSH).
 	ImportImage func(ctx context.Context, c *state.Cluster, n state.Node, image string) error
-	Log         io.Writer
+	// RunRoot holds GPU nodes' unix sockets ("": /tmp/kona-<uid>).
+	RunRoot string
+	// KillMatching kills host processes by command line (nil: pgrep -f).
+	// Tests replace it: a fake cluster's name matches real clusters too.
+	KillMatching func(substr string) []int
+	Log          io.Writer
 	// HostPrefixes returns host interface subnets (overridable in tests).
 	HostPrefixes func() []netip.Prefix
 	// Now and Sleep are overridable in tests.
@@ -640,17 +645,17 @@ func (m *Manager) Delete(ctx context.Context, name string) error {
 			errs = append(errs, m.GPU.Delete(ctx, m.krunkitNode(c, n)))
 		}
 	}
-	if n := stopRelays(name); n > 0 {
+	if n := m.stopRelays(name); n > 0 {
 		m.logf("• Stopped %d WireGuard relay(s)", n)
 	}
 	// Orphaned krunkit/vmnet-helper processes (state lost mid-create): their
 	// command lines point into the cluster's state and socket dirs.
-	for _, dir := range []string{filepath.Join(m.Store.Dir(name), "nodes") + "/", RunDir(name) + "/"} {
-		if pids := krunkit.KillMatching(dir); len(pids) > 0 {
+	for _, dir := range []string{filepath.Join(m.Store.Dir(name), "nodes") + "/", m.RunDir(name) + "/"} {
+		if pids := m.killMatching(dir); len(pids) > 0 {
 			m.logf("• Killed %d orphaned GPU node process(es)", len(pids))
 		}
 	}
-	errs = append(errs, os.RemoveAll(RunDir(name)))
+	errs = append(errs, os.RemoveAll(m.RunDir(name)))
 	cs, err := m.Container.Containers(ctx)
 	if err != nil {
 		return err

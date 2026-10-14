@@ -7,7 +7,6 @@ import (
 	"strconv"
 
 	"github.com/lestex/kona/internal/procx"
-	"github.com/lestex/kona/internal/runtime/krunkit"
 	"github.com/lestex/kona/internal/state"
 	"github.com/lestex/kona/internal/wg"
 )
@@ -66,6 +65,6 @@ func (m *Manager) startRelay(c *state.Cluster, n state.Node) error {
 }
 
 // stopRelays kills a cluster's relays, with or without state.
-func stopRelays(cluster string) int {
-	return len(krunkit.KillMatching("wg-relay " + relayTag(cluster) + " "))
+func (m *Manager) stopRelays(cluster string) int {
+	return len(m.killMatching("wg-relay " + relayTag(cluster) + " "))
 }

@@ -38,6 +38,7 @@ type sim struct {
 	notReady   bool
 	cilium     bool     // cilium DaemonSet exists
 	extraNodes []string // non-container nodes (GPU) reported by kubectl
+	killed     []string // KillMatching patterns
 }
 
 func newSim() *sim {
@@ -171,7 +172,9 @@ func setup(t *testing.T) (*Manager, *sim, *bytes.Buffer, CreateOptions) {
 	os.WriteFile(cache.Path(tools.CiliumCLI()), []byte("#!/bin/sh"), 0o755) // pre-cached CLI
 	m := &Manager{
 		Store: &state.Store{Root: t.TempDir()}, Container: container.New(s.runner()), Log: &log,
-		Host: host, Tools: cache,
+		Host: host, Tools: cache, RunRoot: t.TempDir(),
+		// Never pgrep the host: "kona" also names the developer's cluster.
+		KillMatching: func(substr string) []int { s.killed = append(s.killed, substr); return nil },
 		HostPrefixes: func() []netip.Prefix { return []netip.Prefix{netip.MustParsePrefix("192.168.1.0/24")} },
 		Now:          func() time.Time { return now },
 		Sleep: func(context.Context, time.Duration) error {
@@ -473,6 +476,13 @@ func TestCreateWithGPUWorker(t *testing.T) {
 	}
 	if m.GPU.Running(kn) || len(s.containers) != 0 {
 		t.Fatal("GPU VM or containers survived delete")
+	}
+	if !strings.HasPrefix(kn.RunDir, m.RunRoot+"/") {
+		t.Fatalf("GPU sockets outside the test's run root: %s", kn.RunDir)
+	}
+	if k := strings.Join(s.killed, "|"); !strings.Contains(k, "wg-relay --cluster=kona ") ||
+		!strings.Contains(k, m.RunDir("kona")+"/") {
+		t.Fatalf("delete did not stop relays and orphans: %q", k)
 	}
 }
 
