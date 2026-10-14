@@ -7,7 +7,7 @@ import (
 )
 
 func newStartCmd(g *globals) *cobra.Command {
-	cmd := &cobra.Command{Use: "start", Short: "Start a resource (cluster)"}
+	cmd := &cobra.Command{Use: "start", Short: "Start a resource (cluster, node)"}
 	var wait time.Duration
 	cluster := &cobra.Command{
 		Use:   "cluster [NAME]",
@@ -22,6 +22,17 @@ func newStartCmd(g *globals) *cobra.Command {
 		},
 	}
 	cluster.Flags().DurationVar(&wait, "wait", 5*time.Minute, "how long to wait for all nodes to be Ready")
-	cmd.AddCommand(cluster)
+	var name string
+	node := &cobra.Command{
+		Use:   "node NODE...",
+		Short: "Start stopped nodes and wait for them to be Ready",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return g.manager(cmd).StartNodes(cmd.Context(), name, args, wait)
+		},
+	}
+	node.Flags().StringVar(&name, "name", DefaultClusterName, "cluster name")
+	node.Flags().DurationVar(&wait, "wait", 5*time.Minute, "how long to wait for the nodes to be Ready")
+	cmd.AddCommand(cluster, node)
 	return cmd
 }

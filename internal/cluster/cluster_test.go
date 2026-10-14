@@ -687,3 +687,32 @@ func TestStopThenStartCluster(t *testing.T) {
 		t.Fatalf("list after start: %+v", infos[0])
 	}
 }
+
+func TestStopAndStartOneNode(t *testing.T) {
+	m, s, _, o := setup(t)
+	if err := m.Create(context.Background(), o); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.StopNodes(context.Background(), "kona", []string{"nope"}); err == nil {
+		t.Fatal("unknown node accepted")
+	}
+	if err := m.StopNodes(context.Background(), "kona", []string{"kona-worker-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.stopped) != 1 || !s.stopped["kona-worker-1"] {
+		t.Fatalf("stopped: %v", s.stopped)
+	}
+	if len(s.killed) != 0 {
+		t.Fatalf("stopping one node must leave relays alone: %v", s.killed)
+	}
+	if infos, _ := m.List(context.Background()); infos[0].Status != StatusDegraded {
+		t.Fatalf("one node down is degraded, not stopped: %+v", infos[0])
+	}
+	s.lag = 2
+	if err := m.StartNodes(context.Background(), "kona", []string{"kona-worker-1"}, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.stopped) != 0 || s.reported["kona-worker-1"] != s.boot["kona-worker-1"] {
+		t.Fatalf("not started fresh: stopped=%v reported=%q boot=%q", s.stopped, s.reported["kona-worker-1"], s.boot["kona-worker-1"])
+	}
+}
