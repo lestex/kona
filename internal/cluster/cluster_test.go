@@ -39,11 +39,36 @@ type sim struct {
 	cilium     bool     // cilium DaemonSet exists
 	extraNodes []string // non-container nodes (GPU) reported by kubectl
 	killed     []string // KillMatching patterns
+	// boot is each VM's current boot ID; the kubelet's report (reported)
+	// catches up lag polls of `get nodes` after it changes.
+	boot, reported map[string]string
+	lag            int
+	nodePolls      int
+}
+
+func (s *sim) bootOf(n string) string {
+	if s.boot[n] == "" {
+		s.boot[n] = "boot-" + n
+	}
+	return s.boot[n]
+}
+
+func (s *sim) reportedBoot(n string) string {
+	if s.reported[n] == "" {
+		s.reported[n] = s.bootOf(n)
+	}
+	if s.reported[n] != s.bootOf(n) {
+		if s.lag <= 0 {
+			s.reported[n] = s.bootOf(n)
+		}
+	}
+	return s.reported[n]
 }
 
 func newSim() *sim {
 	return &sim{networks: map[string]string{"default": "192.168.64.0/24"},
-		volumes: map[string]map[string]string{}, containers: map[string]map[string]string{}}
+		volumes: map[string]map[string]string{}, containers: map[string]map[string]string{},
+		boot: map[string]string{}, reported: map[string]string{}}
 }
 
 func labelsFrom(args []string) map[string]string {
@@ -126,14 +151,19 @@ func (s *sim) runner() *execx.Fake {
 				for n := range s.containers {
 					names = append(names, n)
 				}
+				s.nodePolls++
 				for _, n := range names {
 					st := "True"
 					if s.notReady {
 						st = "False"
 					}
-					items = append(items, fmt.Sprintf(`{"metadata":{"name":%q},"status":{"conditions":[{"type":"Ready","status":%q}]}}`, n, st))
+					items = append(items, fmt.Sprintf(`{"metadata":{"name":%q},"status":{"conditions":[{"type":"Ready","status":%q}],"nodeInfo":{"bootID":%q}}}`,
+						n, st, s.reportedBoot(n)))
 				}
+				s.lag--
 				return ok(`{"items":[` + strings.Join(items, ",") + `]}`)
+			case cmd == "cat /proc/sys/kernel/random/boot_id":
+				return ok(s.bootOf(args[1]) + "\n")
 			case strings.HasPrefix(cmd, "cat "):
 				return ok(adminKubeconfig)
 			case strings.Contains(cmd, "get resourceslices --field-selector"):
@@ -406,6 +436,9 @@ func gpuSetup(t *testing.T, venus bool) (*Manager, *sim, CreateOptions) {
 	}
 	host := m.Host.(*execx.Fake)
 	host.Match = func(line string) (execx.FakeResponse, bool) {
+		if strings.HasPrefix(line, "ssh ") && strings.HasSuffix(line, " cat /proc/sys/kernel/random/boot_id") {
+			return execx.FakeResponse{Out: []byte(s.bootOf("kona-gpu-worker-1") + "\n")}, true
+		}
 		if strings.HasPrefix(line, "ssh ") && strings.Contains(line, "vulkaninfo") {
 			if venus {
 				return execx.FakeResponse{Out: []byte(venusSummary)}, true
@@ -532,7 +565,7 @@ func TestVenusDevice(t *testing.T) {
 }
 
 func TestStartRestartsDeadGPUNode(t *testing.T) {
-	m, _, o := gpuSetup(t, true)
+	m, s, o := gpuSetup(t, true)
 	t.Cleanup(func() { m.Delete(context.Background(), "kona") })
 	if err := m.Create(context.Background(), o); err != nil {
 		t.Fatal(err)
@@ -543,11 +576,17 @@ func TestStartRestartsDeadGPUNode(t *testing.T) {
 	if m.GPU.Running(kn) {
 		t.Fatal("precondition: GPU VM should be stopped")
 	}
+	// The VM boots with a new boot ID; the Node keeps its stale Ready and
+	// old boot ID for 3 polls until the kubelet re-registers.
+	s.boot["kona-gpu-worker-1"], s.lag, s.nodePolls = "boot-2", 3, 0
 	if err := m.Start(context.Background(), "kona", time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	if !m.GPU.Running(kn) {
 		t.Fatal("Start did not boot the GPU VM")
+	}
+	if s.reported["kona-gpu-worker-1"] != "boot-2" || s.nodePolls < 4 {
+		t.Fatalf("Start trusted a stale Ready (reported boot %q after %d polls)", s.reported["kona-gpu-worker-1"], s.nodePolls)
 	}
 }
 

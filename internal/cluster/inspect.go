@@ -182,17 +182,26 @@ func (m *Manager) Nodes(ctx context.Context, name string) ([]NodeInfo, error) {
 	return out, nil
 }
 
+// nodeExec runs a command on a node: `container exec` for CPU nodes, SSH
+// for krunkit nodes.
+func (m *Manager) nodeExec(ctx context.Context, c *state.Cluster, n state.Node, cmd ...string) ([]byte, error) {
+	if n.Kind == state.KindKrunkit {
+		return m.Host.Run(ctx, "ssh", m.SSHArgs(c, n, cmd...)...)
+	}
+	return m.Container.Exec(ctx, n.Name, cmd...)
+}
+
+// bootID is the node VM's current boot ID.
+func (m *Manager) bootID(ctx context.Context, c *state.Cluster, n state.Node) (string, error) {
+	out, err := m.nodeExec(ctx, c, n, "cat", "/proc/sys/kernel/random/boot_id")
+	return strings.TrimSpace(string(out)), err
+}
+
 // skew measures guest-minus-host clock offset, taking the host time at the
 // midpoint of the exec round-trip.
 func (m *Manager) skew(ctx context.Context, c *state.Cluster, n state.Node) (float64, error) {
 	before := m.Now()
-	var out []byte
-	var err error
-	if n.Kind == state.KindKrunkit {
-		out, err = m.Host.Run(ctx, "ssh", m.SSHArgs(c, n, "date", "+%s.%N")...)
-	} else {
-		out, err = m.Container.Exec(ctx, n.Name, "date", "+%s.%N")
-	}
+	out, err := m.nodeExec(ctx, c, n, "date", "+%s.%N")
 	after := m.Now()
 	if err != nil {
 		return 0, err

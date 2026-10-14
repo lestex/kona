@@ -26,7 +26,7 @@ func (m *Manager) Start(ctx context.Context, name string, wait time.Duration) er
 		return err
 	}
 	deadline := m.Now().Add(wait)
-	started := 0
+	rebooted := map[string]bool{}
 	// Control planes first: agents need the API.
 	for _, controlPlanes := range []bool{true, false} {
 		for _, n := range c.Nodes {
@@ -59,7 +59,7 @@ func (m *Manager) Start(ctx context.Context, name string, wait time.Duration) er
 					return err
 				}
 			}
-			started++
+			rebooted[n.Name] = true
 		}
 	}
 	if len(c.GPUNodes()) > 0 {
@@ -67,7 +67,7 @@ func (m *Manager) Start(ctx context.Context, name string, wait time.Duration) er
 			return err
 		}
 	}
-	if started == 0 {
+	if len(rebooted) == 0 {
 		m.logf("✓ All nodes of %q are already running", name)
 		return nil
 	}
@@ -75,5 +75,5 @@ func (m *Manager) Start(ctx context.Context, name string, wait time.Duration) er
 		return err
 	}
 	m.logf("• Waiting up to %s for %d nodes to be Ready", deadline.Sub(m.Now()).Round(time.Second), len(c.Nodes))
-	return m.waitNodesReady(ctx, d, c, nodeNames(c.Nodes), deadline, true)
+	return m.waitNodesFresh(ctx, d, c, nodeNames(c.Nodes), rebooted, deadline, true)
 }
