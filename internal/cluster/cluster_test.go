@@ -49,15 +49,20 @@ type sim struct {
 	ips, labels                             map[string]string
 	clock                                   string // guest `date +%s.%N`
 	crashPod, dsNotReady, noSlices, apiDown bool
+	unhealthy                               int // polls a DaemonSet stays not ready
 }
 
 // objects answers `kubectl get nodes,pods,daemonsets,deployments -A -o json`.
 func (s *sim) objects(names []string) string {
 	var items []string
 	for _, n := range names {
+		addr := "" // unknown unless the test recorded the node's IP
+		if ip := s.ips[n]; ip != "" {
+			addr = fmt.Sprintf(`{"type":"InternalIP","address":%q}`, ip)
+		}
 		items = append(items, fmt.Sprintf(`{"kind":"Node","metadata":{"name":%q,"labels":{%q:%q}},"status":{"conditions":[{"type":"Ready","status":"True"}],`+
-			`"addresses":[{"type":"InternalIP","address":%q}],"nodeInfo":{"bootID":%q}}}`,
-			n, LabelGPU, s.labels[n], s.ips[n], s.reportedBoot(n)))
+			`"addresses":[%s],"nodeInfo":{"bootID":%q}}}`,
+			n, LabelGPU, s.labels[n], addr, s.reportedBoot(n)))
 	}
 	pod := `{"kind":"Pod","metadata":{"name":"coredns-1","namespace":"kube-system"},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"True"}]}}`
 	if s.crashPod {
@@ -65,9 +70,10 @@ func (s *sim) objects(names []string) string {
 			`"containerStatuses":[{"state":{"waiting":{"reason":"CrashLoopBackOff"}}}]}}`
 	}
 	ready := len(names)
-	if s.dsNotReady {
+	if s.dsNotReady || s.unhealthy > 0 {
 		ready--
 	}
+	s.unhealthy--
 	items = append(items, pod,
 		fmt.Sprintf(`{"kind":"DaemonSet","metadata":{"name":"cilium","namespace":"kube-system"},"status":{"desiredNumberScheduled":%d,"numberReady":%d}}`, len(names), ready),
 		`{"kind":"Deployment","metadata":{"name":"coredns","namespace":"kube-system"},"status":{"readyReplicas":1}}`)
@@ -263,6 +269,8 @@ func setup(t *testing.T) (*Manager, *sim, *bytes.Buffer, CreateOptions) {
 		Host: host, Tools: cache, RunRoot: t.TempDir(),
 		// Never pgrep the host: "kona" also names the developer's cluster.
 		KillMatching: func(substr string) []int { s.killed = append(s.killed, substr); return nil },
+		RelayRunning: func(*state.Cluster, state.Node) bool { return true },
+		HostDial:     func(string) error { return nil },
 		HostPrefixes: func() []netip.Prefix { return []netip.Prefix{netip.MustParsePrefix("192.168.1.0/24")} },
 		Now:          func() time.Time { return now },
 		Sleep: func(context.Context, time.Duration) error {
@@ -482,6 +490,7 @@ func gpuSetup(t *testing.T, venus bool) (*Manager, *sim, CreateOptions) {
 		os.WriteFile(p, []byte("#!/bin/sh\n"+body+"\n"), 0o755)
 		return p
 	}
+	s.labels["kona-gpu-worker-1"] = map[bool]string{true: GPUAvailable, false: GPUUnavailable}[venus]
 	m.GPU = &krunkit.Runtime{Krunkit: script("krunkit", "sleep 30"),
 		VmnetHelper:   script("vmnet-helper", `echo '{"vmnet_mtu":1500}'; exec sleep 30`),
 		HelperTimeout: 5 * time.Second, StopGrace: 200 * time.Millisecond}
@@ -718,9 +727,12 @@ func TestStopThenStartCluster(t *testing.T) {
 	if err := m.Stop(context.Background(), "kona"); err != nil { // idempotent
 		t.Fatal(err)
 	}
-	s.lag = 2
+	s.lag, s.unhealthy = 2, 3 // Cilium comes back after the nodes
 	if err := m.Start(context.Background(), "kona", time.Minute); err != nil {
 		t.Fatal(err)
+	}
+	if s.unhealthy >= 0 {
+		t.Fatalf("Start returned before the DaemonSets were ready (%d polls left)", s.unhealthy)
 	}
 	if !m.GPU.Running(kn) || len(s.stopped) != 0 {
 		t.Fatalf("not resumed: gpu=%v stopped=%v", m.GPU.Running(kn), s.stopped)
@@ -774,10 +786,7 @@ func verifySetup(t *testing.T) (*Manager, *sim) {
 	for _, n := range mustLoad(t, m, "kona").Nodes {
 		s.ips[n.Name] = n.IP
 	}
-	s.labels["kona-gpu-worker-1"] = GPUAvailable
 	s.clock = fmt.Sprintf("%d.0", m.Now().Unix())
-	m.RelayRunning = func(*state.Cluster, state.Node) bool { return true }
-	m.HostDial = func(string) error { return nil }
 	return m, s
 }
 
@@ -846,5 +855,19 @@ func TestVerifyFindsProblems(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestStartReportsUnhealthyCluster(t *testing.T) {
+	m, s, _, o := setup(t)
+	if err := m.Create(context.Background(), o); err != nil {
+		t.Fatal(err)
+	}
+	m.StopNodes(context.Background(), "kona", []string{"kona-worker-1"})
+	s.crashPod = true
+	err := m.StartNodes(context.Background(), "kona", []string{"kona-worker-1"}, time.Minute)
+	if err == nil || !strings.Contains(err.Error(), "pods: kube-system/cilium-x (CrashLoopBackOff)") ||
+		!strings.Contains(err.Error(), "kona verify cluster kona") {
+		t.Fatalf("want verify failure, got %v", err)
 	}
 }

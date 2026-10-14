@@ -90,7 +90,38 @@ func (m *Manager) StartNodes(ctx context.Context, name string, names []string, w
 		wait4 = names
 	}
 	m.logf("• Waiting up to %s for %d nodes to be Ready", deadline.Sub(m.Now()).Round(time.Second), len(wait4))
-	return m.waitNodesFresh(ctx, d, c, wait4, rebooted, deadline, true)
+	if err := m.waitNodesFresh(ctx, d, c, wait4, rebooted, deadline, true); err != nil {
+		return err
+	}
+	return m.waitHealthy(ctx, name, deadline)
+}
+
+// waitHealthy polls Verify until no check fails: a node turns Ready before
+// its CNI, DNS and DRA pods are back, and the cluster isn't usable until
+// they are.
+func (m *Manager) waitHealthy(ctx context.Context, name string, deadline time.Time) error {
+	m.logf("• Waiting for system pods, DNS and GPUs")
+	var failed []string
+	for m.Now().Before(deadline) {
+		r, err := m.Verify(ctx, name)
+		failed = failed[:0]
+		if err != nil {
+			failed = append(failed, err.Error())
+		}
+		for _, c := range r.Checks {
+			if c.Status == CheckFail {
+				failed = append(failed, c.ID+": "+c.Detail)
+			}
+		}
+		if len(failed) == 0 {
+			m.logf("✓ Cluster %q is healthy", name)
+			return nil
+		}
+		if err := m.Sleep(ctx, pollInterval); err != nil {
+			return err
+		}
+	}
+	return fmt.Errorf("cluster not healthy before --wait expired (see `kona verify cluster %s`): %s", name, strings.Join(failed, "; "))
 }
 
 // pickNodes returns the set of node names to act on: names, validated, or
