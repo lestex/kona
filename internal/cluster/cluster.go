@@ -58,6 +58,9 @@ type Manager struct {
 	// KillMatching kills host processes by command line (nil: pgrep -f).
 	// Tests replace it: a fake cluster's name matches real clusters too.
 	KillMatching func(substr string) []int
+	// RelayRunning and HostDial are verify's host probes (nil: real ones).
+	RelayRunning func(c *state.Cluster, n state.Node) bool
+	HostDial     func(addr string) error
 	Log          io.Writer
 	// HostPrefixes returns host interface subnets (overridable in tests).
 	HostPrefixes func() []netip.Prefix

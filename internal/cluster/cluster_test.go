@@ -45,6 +45,33 @@ type sim struct {
 	lag            int
 	nodePolls      int
 	stopped        map[string]bool // containers that are stopped
+	// verify's view: node IPs/labels, and switches that break one thing.
+	ips, labels                             map[string]string
+	clock                                   string // guest `date +%s.%N`
+	crashPod, dsNotReady, noSlices, apiDown bool
+}
+
+// objects answers `kubectl get nodes,pods,daemonsets,deployments -A -o json`.
+func (s *sim) objects(names []string) string {
+	var items []string
+	for _, n := range names {
+		items = append(items, fmt.Sprintf(`{"kind":"Node","metadata":{"name":%q,"labels":{%q:%q}},"status":{"conditions":[{"type":"Ready","status":"True"}],`+
+			`"addresses":[{"type":"InternalIP","address":%q}],"nodeInfo":{"bootID":%q}}}`,
+			n, LabelGPU, s.labels[n], s.ips[n], s.reportedBoot(n)))
+	}
+	pod := `{"kind":"Pod","metadata":{"name":"coredns-1","namespace":"kube-system"},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"True"}]}}`
+	if s.crashPod {
+		pod = `{"kind":"Pod","metadata":{"name":"cilium-x","namespace":"kube-system"},"status":{"phase":"Running",` +
+			`"containerStatuses":[{"state":{"waiting":{"reason":"CrashLoopBackOff"}}}]}}`
+	}
+	ready := len(names)
+	if s.dsNotReady {
+		ready--
+	}
+	items = append(items, pod,
+		fmt.Sprintf(`{"kind":"DaemonSet","metadata":{"name":"cilium","namespace":"kube-system"},"status":{"desiredNumberScheduled":%d,"numberReady":%d}}`, len(names), ready),
+		`{"kind":"Deployment","metadata":{"name":"coredns","namespace":"kube-system"},"status":{"readyReplicas":1}}`)
+	return `{"items":[` + strings.Join(items, ",") + `]}`
 }
 
 func (s *sim) bootOf(n string) string {
@@ -69,7 +96,8 @@ func (s *sim) reportedBoot(n string) string {
 func newSim() *sim {
 	return &sim{networks: map[string]string{"default": "192.168.64.0/24"},
 		volumes: map[string]map[string]string{}, containers: map[string]map[string]string{},
-		boot: map[string]string{}, reported: map[string]string{}, stopped: map[string]bool{}}
+		boot: map[string]string{}, reported: map[string]string{}, stopped: map[string]bool{},
+		ips: map[string]string{}, labels: map[string]string{}}
 }
 
 func labelsFrom(args []string) map[string]string {
@@ -158,7 +186,23 @@ func (s *sim) runner() *execx.Fake {
 			cmd := strings.Join(args[2:], " ")
 			switch {
 			case strings.HasSuffix(cmd, "get --raw /readyz"):
+				if s.apiDown {
+					return execx.FakeResponse{Err: &execx.Error{Stderr: "connection refused", Err: errors.New("exit 1")}}, true
+				}
 				return ok("ok")
+			case strings.HasSuffix(cmd, "get nodes,pods,daemonsets,deployments -A -o json"):
+				names := append([]string{}, s.extraNodes...)
+				for n := range s.containers {
+					names = append(names, n)
+				}
+				return ok(s.objects(names))
+			case strings.HasSuffix(cmd, "get resourceslices -o json"):
+				if s.noSlices {
+					return ok(`{"items":[]}`)
+				}
+				return ok(`{"items":[{"spec":{"nodeName":"kona-gpu-worker-1"}}]}`)
+			case cmd == "date +%s.%N":
+				return ok(s.clock)
 			case strings.HasSuffix(cmd, "get nodes -o json"):
 				var items []string
 				names := append([]string{}, s.extraNodes...)
@@ -450,6 +494,9 @@ func gpuSetup(t *testing.T, venus bool) (*Manager, *sim, CreateOptions) {
 	}
 	host := m.Host.(*execx.Fake)
 	host.Match = func(line string) (execx.FakeResponse, bool) {
+		if strings.HasPrefix(line, "ssh ") && strings.HasSuffix(line, " date +%s.%N") {
+			return execx.FakeResponse{Out: []byte(s.clock)}, true
+		}
 		if strings.HasPrefix(line, "ssh ") && strings.HasSuffix(line, " cat /proc/sys/kernel/random/boot_id") {
 			return execx.FakeResponse{Out: []byte(s.bootOf("kona-gpu-worker-1") + "\n")}, true
 		}
@@ -714,5 +761,90 @@ func TestStopAndStartOneNode(t *testing.T) {
 	}
 	if len(s.stopped) != 0 || s.reported["kona-worker-1"] != s.boot["kona-worker-1"] {
 		t.Fatalf("not started fresh: stopped=%v reported=%q boot=%q", s.stopped, s.reported["kona-worker-1"], s.boot["kona-worker-1"])
+	}
+}
+
+func verifySetup(t *testing.T) (*Manager, *sim) {
+	t.Helper()
+	m, s, o := gpuSetup(t, true)
+	t.Cleanup(func() { m.Delete(context.Background(), "kona") })
+	if err := m.Create(context.Background(), o); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range mustLoad(t, m, "kona").Nodes {
+		s.ips[n.Name] = n.IP
+	}
+	s.labels["kona-gpu-worker-1"] = GPUAvailable
+	s.clock = fmt.Sprintf("%d.0", m.Now().Unix())
+	m.RelayRunning = func(*state.Cluster, state.Node) bool { return true }
+	m.HostDial = func(string) error { return nil }
+	return m, s
+}
+
+func checks(t *testing.T, m *Manager) map[string]Check {
+	t.Helper()
+	r, err := m.Verify(context.Background(), "kona")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]Check{}
+	for _, c := range r.Checks {
+		out[c.ID] = c
+	}
+	return out
+}
+
+func TestVerifyHealthyGPUCluster(t *testing.T) {
+	m, _ := verifySetup(t)
+	r, err := m.Verify(context.Background(), "kona")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range r.Checks {
+		if c.Status != CheckPass {
+			t.Errorf("%s: %s %s", c.ID, c.Status, c.Detail)
+		}
+	}
+	if len(r.Checks) != 10 || r.Failed() != 0 {
+		t.Fatalf("report: %+v", r)
+	}
+}
+
+func TestVerifyFindsProblems(t *testing.T) {
+	cases := []struct {
+		name    string
+		breakIt func(m *Manager, s *sim)
+		want    map[string]string // check id -> status
+	}{
+		{"stopped VM with stale Ready", func(m *Manager, s *sim) { s.stopped["kona-worker-1"] = true },
+			map[string]string{"vms": CheckFail, "nodes": CheckFail}},
+		{"stale boot ID", func(m *Manager, s *sim) { s.boot["kona-worker-2"], s.lag = "boot-new", 99 },
+			map[string]string{"vms": CheckPass, "nodes": CheckFail}},
+		{"wrong node IP", func(m *Manager, s *sim) { s.ips["kona-worker-1"] = "192.168.64.9" },
+			map[string]string{"nodes": CheckFail}},
+		{"crash-looping pod", func(m *Manager, s *sim) { s.crashPod = true }, map[string]string{"pods": CheckFail}},
+		{"DaemonSet not ready", func(m *Manager, s *sim) { s.dsNotReady = true }, map[string]string{"daemonsets": CheckFail}},
+		{"no ResourceSlice", func(m *Manager, s *sim) { s.noSlices = true }, map[string]string{"gpu": CheckFail}},
+		{"no Venus", func(m *Manager, s *sim) { s.labels["kona-gpu-worker-1"] = GPUUnavailable }, map[string]string{"gpu": CheckWarn}},
+		{"dead relay", func(m *Manager, s *sim) {
+			m.RelayRunning = func(_ *state.Cluster, n state.Node) bool { return n.Name != "kona-worker-1" }
+		}, map[string]string{"relays": CheckFail}},
+		{"host can't reach API", func(m *Manager, s *sim) { m.HostDial = func(string) error { return errors.New("timeout") } },
+			map[string]string{"host-api": CheckFail, "api": CheckPass}},
+		{"clock skew", func(m *Manager, s *sim) { s.clock = fmt.Sprintf("%d.0", m.Now().Unix()+5) }, map[string]string{"clock": CheckWarn}},
+		{"API down", func(m *Manager, s *sim) { s.apiDown = true },
+			map[string]string{"api": CheckFail, "nodes": CheckSkip, "gpu": CheckSkip, "clock": CheckSkip}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m, s := verifySetup(t)
+			tc.breakIt(m, s)
+			got := checks(t, m)
+			for id, want := range tc.want {
+				if got[id].Status != want {
+					t.Errorf("%s = %s (%s), want %s", id, got[id].Status, got[id].Detail, want)
+				}
+			}
+		})
 	}
 }
