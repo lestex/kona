@@ -71,10 +71,10 @@ flowchart LR
     subgraph gnet["vmnet-helper shared net (GPU subnet, e.g. 192.168.170.0/24)"]
       g1["gpu-worker-1<br/>eth0 .10 (static, cloud-init)"]
     end
-    proxy(["container published UDP ports<br/>51820+N/udp on host"])
+    relay(["kona wg-relay per CPU node<br/>0.0.0.0:51820+N/udp on host<br/>(--gpu-link publish: container's -p forwarder)"])
   end
   cp <-- "direct L2, no tunnel" --> w1
-  g1 -- "wg0 → 192.168.x.1:51820+N" --> proxy --> cp & w1
+  g1 -- "wg0 → 192.168.x.1:51820+N" --> relay --> cp & w1
 ```
 
 - **Node IP** = the node's static underlay address from the cluster /24
@@ -87,10 +87,26 @@ flowchart LR
   encapsulation other than the CNI's.
 - **CPU↔GPU (Phase 3)**: every GPU node runs `wg0` with one peer per CPU node.
   The peer's `AllowedIPs` is that node's underlay /32 plus its pod CIDR. GPU
-  nodes dial the CPU node's WireGuard port, which is published on the host
-  (`-p <51820+N>:51820/udp`, N allocated per cluster and stored in state), at
-  their own gateway. CPU nodes get a route to the GPU subnet via `wg0` and
-  learn GPU endpoints from the handshake (`PersistentKeepalive=25`).
+  nodes dial `<their gateway>:<51820+N>/udp`, where N is allocated per cluster
+  and stored in state. The host listens on both networks, so something on
+  the host has to carry each datagram to the CPU node's `192.168.70.x:51820`.
+  That's the **GPU link**, chosen with `kona create cluster --gpu-link`:
+  - `relay` (default): `kona wg-relay`, one detached UDP relay process per CPU
+    node, started by `create`/`start cluster` and stopped by
+    `stop`/`delete`. Each GPU client gets its own upstream socket, so replies
+    map back to the right GPU node. It only uses kona's own sockets, so it
+    doesn't depend on the `container` build.
+  - `publish`: `container run -p <51820+N>:51820/udp` on each CPU node, using
+    container's own port forwarder. It works on Homebrew's ad-hoc-signed 1.5.0
+    build: on 2026-10-13 a `--gpu-link publish` cluster passed the GPU↔CPU
+    pod-to-pod gate, even though that build's macOS Local Network rule is
+    denied and its TCP forwarding is broken ([failure-modes.md](failure-modes.md)).
+    It was kona's only mode until 1.5.0, and the relay became the default
+    because it doesn't depend on that forwarder.
+
+  CPU nodes get a route to the GPU subnet via `wg0` and learn GPU endpoints
+  from the handshake (`PersistentKeepalive=25`). `kona verify cluster`
+  checks that every relay is running.
 - **MTU budget**: underlay 1500. On CPU↔GPU paths `wg0` is 1420, so the CNI
   MTU is set cluster-wide to 1370 once GPU nodes exist, which covers
   flannel/Cilium VXLAN on top of `wg0`. CPU-only clusters keep 1450.
@@ -99,13 +115,14 @@ flowchart LR
   in Phase 1, see [gates.md](gates.md)). There's no port publish. The cert SANs
   include every control-plane IP and name.
 - **No NAT between nodes** at the Kubernetes layer. Inside the tunnel, packets
-  carry real node and pod IPs. The only NAT is the published-port proxy
-  *underneath* WireGuard on CPU↔GPU paths.
+  carry real node and pod IPs. The only NAT is the GPU link (relay or
+  published-port forwarder) *underneath* WireGuard on CPU↔GPU paths.
 - **No sudo** anywhere in this design.
 
 ### Trade-offs
 
-- GPU↔CPU throughput is ~365 Mbit/s (a userspace UDP proxy). That's plenty
+- GPU↔CPU throughput goes through a userspace UDP hop: ~745 Mbit/s with the
+  relay, ~365 Mbit/s with container's published-port forwarder. That's plenty
   for the control plane, image pulls through the registry, and inference
   requests, but not for bulk data between CPU and GPU pods. GPU↔GPU and
   CPU↔CPU run at native vmnet speed.
