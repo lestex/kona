@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	resourceapi "k8s.io/api/resource/v1"
@@ -104,5 +105,25 @@ func TestResources(t *testing.T) {
 		*dev.Attributes["vulkanApiVersion"].VersionValue != "1.2.0" ||
 		*dev.Attributes["deviceName"].StringValue != "Virtio-GPU Venus (Apple M3 Pro)" {
 		t.Fatalf("device: %+v", dev)
+	}
+}
+
+func TestParseVenusHeapBytes(t *testing.T) {
+	// Trimmed real `vulkaninfo` from a krunkit guest on an 18 GiB M3 Pro.
+	b, err := os.ReadFile("testdata/vulkaninfo.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := string(b)
+	if n, err := ParseVenusHeapBytes(full); err != nil || n != 19327352832 {
+		t.Fatalf("venus first: %d, %v", n, err)
+	}
+	// llvmpipe listed first must not leak its heap into the result.
+	i := strings.Index(full, "GPU1:")
+	if n, err := ParseVenusHeapBytes(full[i:] + full[:i]); err != nil || n != 19327352832 {
+		t.Fatalf("venus second: %d, %v", n, err)
+	}
+	if _, err := ParseVenusHeapBytes(full[i:]); err == nil {
+		t.Fatal("llvmpipe alone must not count")
 	}
 }
