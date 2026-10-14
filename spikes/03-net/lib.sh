@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Shared helpers for the networking spike. Source from bash.
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 key=$here/../02-krunkit/work/id_ed25519

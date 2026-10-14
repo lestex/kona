@@ -4,6 +4,7 @@
 # `container run -p 51821:51821/udp`; gpu0 dials the host side of its own
 # vmnet network (192.168.65.1) and keeps the path open with keepalives.
 set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
 source "$(dirname "$0")/lib.sh"
 CPU=cpu1
 

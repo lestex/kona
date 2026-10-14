@@ -2,6 +2,7 @@
 # Measure the cpu1 <-> gpu0 path: overlay source IPs (no NAT inside the
 # tunnel), path MTU, and throughput both ways.
 set -uo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
 source "$(dirname "$0")/lib.sh"
 CPU=cpu1
 
