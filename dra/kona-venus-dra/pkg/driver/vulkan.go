@@ -10,6 +10,7 @@ import (
 type VenusGPU struct {
 	DeviceName string
 	APIVersion string // e.g. "1.2.0"
+	HeapBytes  int64  // device-local heap; 0 if unknown
 }
 
 // ParseVulkanSummary extracts the Venus device from `vulkaninfo --summary`

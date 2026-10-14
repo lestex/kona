@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 // cdiVersion is supported by containerd 2.x.
@@ -49,8 +52,16 @@ func cdiDeviceName(claimUID string) string { return claimUID + "-" + DeviceName 
 // DeviceID is the fully-qualified CDI device name passed to the runtime.
 func DeviceID(claimUID string) string { return CDIKind + "=" + cdiDeviceName(claimUID) }
 
-// Write creates (or rewrites) the spec for a claim.
-func (c CDI) Write(claimUID string, gpu VenusGPU) error {
+// Write creates (or rewrites) the spec for a claim that holds memBytes of
+// the GPU memory (0: the device has no capacity).
+func (c CDI) Write(claimUID string, gpu VenusGPU, memBytes int64) error {
+	env := []string{
+		"VK_DRIVER_FILES=" + VenusICD,
+		"KONA_VENUS_DEVICE=" + gpu.DeviceName,
+	}
+	if memBytes > 0 {
+		env = append(env, fmt.Sprintf("%s=%d", MemoryEnv, memBytes))
+	}
 	spec := cdiSpec{
 		CDIVersion: cdiVersion,
 		Kind:       CDIKind,
@@ -58,10 +69,7 @@ func (c CDI) Write(claimUID string, gpu VenusGPU) error {
 			Name: cdiDeviceName(claimUID),
 			ContainerEdits: containerEdits{
 				DeviceNodes: []deviceNode{{Path: RenderNode}},
-				Env: []string{
-					"VK_DRIVER_FILES=" + VenusICD,
-					"KONA_VENUS_DEVICE=" + gpu.DeviceName,
-				},
+				Env:         env,
 			},
 		}},
 	}
@@ -77,6 +85,27 @@ func (c CDI) Write(claimUID string, gpu VenusGPU) error {
 		return err
 	}
 	return os.Rename(tmp, filepath.Join(c.Dir, specFileName(claimUID)))
+}
+
+// Memory returns how much GPU memory a prepared claim holds. Specs without
+// the entry (written before sharing existed) held the whole device.
+func (c CDI) Memory(claimUID string, capBytes int64) (int64, error) {
+	b, err := os.ReadFile(filepath.Join(c.Dir, specFileName(claimUID)))
+	if err != nil {
+		return 0, err
+	}
+	var spec cdiSpec
+	if err := json.Unmarshal(b, &spec); err != nil {
+		return 0, fmt.Errorf("CDI spec of claim %s: %w", claimUID, err)
+	}
+	for _, d := range spec.Devices {
+		for _, e := range d.ContainerEdits.Env {
+			if v, ok := strings.CutPrefix(e, MemoryEnv+"="); ok {
+				return strconv.ParseInt(v, 10, 64)
+			}
+		}
+	}
+	return capBytes, nil
 }
 
 // Remove deletes a claim's spec; a missing spec is not an error.
@@ -111,4 +140,10 @@ func (c CDI) Prepared() ([]string, error) {
 // errInUse is returned when the single device is prepared for another claim.
 func errInUse(other string) error {
 	return fmt.Errorf("device %s is already prepared for claim %s", DeviceName, other)
+}
+
+// errNoMemory is returned when a claim needs more GPU memory than is free.
+func errNoMemory(need, free int64) error {
+	return fmt.Errorf("device %s has %s of memory free, claim needs %s", DeviceName,
+		resource.NewQuantity(free, resource.BinarySI), resource.NewQuantity(need, resource.BinarySI))
 }

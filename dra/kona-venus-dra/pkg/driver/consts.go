@@ -24,3 +24,10 @@ const (
 
 // DeviceName is the single device a krunkit node exposes.
 const DeviceName = "gpu0"
+
+// MemoryCapacity is the device's consumable capacity: claims share the GPU
+// by requesting an amount of it (accounting only; Venus does not isolate).
+const MemoryCapacity = "memory"
+
+// MemoryEnv tells a container how much of the GPU memory its claim holds.
+const MemoryEnv = "KONA_VENUS_MEMORY"
