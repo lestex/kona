@@ -27,7 +27,7 @@ required by the brief. Each lists how it shows up and what kona does about it.
 | Default container MTU 1280 | Fragmentation or drops for overlay traffic | Nodes run with `mtu=1500`. |
 | vmnet passes TSO super-frames to a VM unsegmented ([details](#vmnet-tso-super-frames)) | Uploads of more than ~256 KiB from another `container` VM to a NodePort stall until timeout. Downloads, and uploads from the macOS host or from pods, work | Not handled. It is a vmnet/`container` bug, and kona adds no proxy around it. Reproduce with `hack/repro-vmnet-tso.sh`. |
 | Guest clock drift after host sleep | Skewed timestamps and TLS/token errors | chrony runs with `makestep 1 -1`. `kona get nodes` shows skew per node: after a real overnight sleep/wake cycle, skew was +0.06 s to +0.20 s. |
-| Host reboot, or `container` services restart | All `container` VMs stop, and krunkit VMs are gone | `kona start cluster` restarts control planes first, then workers and GPU nodes, and waits for Ready. Static IPs and WireGuard configs are reapplied from the node disks. |
+| Host reboot, or `container` services restart | All `container` VMs stop, and krunkit VMs are gone | `kona start cluster` restarts control planes first, then workers and GPU nodes, and waits until `kona verify cluster` passes ([lifecycle.md](lifecycle.md)). Static IPs and WireGuard configs are reapplied from the node disks. |
 
 ## Lifecycle
 
