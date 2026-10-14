@@ -9,7 +9,7 @@ set -euo pipefail
 cluster=${1:-kona}
 here=$(cd "$(dirname "$0")" && pwd)
 kona=${KONA:-$here/../bin/kona}
-ns=kona-gate-dra
+ns="kona-gate-dra"
 k() { kubectl -n "$ns" "$@"; }
 gpu_ssh() { "$kona" ssh --name "$cluster" "$gpu" -- "$@"; }
 
