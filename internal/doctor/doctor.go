@@ -137,13 +137,67 @@ func (d *Doctor) container(ctx context.Context) []Result {
 	r.Status, r.Message = OK, "container "+got
 
 	s := Result{Name: "container-system"}
-	if _, err := d.Runner.Run(ctx, "container", "system", "status"); err != nil {
+	status, err := d.Runner.Run(ctx, "container", "system", "status")
+	if err != nil {
 		s.Status, s.Message = Fail, "`container` services are not running"
 		s.Fix = "container system start"
-	} else {
-		s.Status, s.Message = OK, "services running"
+		return []Result{r, s}
 	}
-	return []Result{r, s}
+	s.Status, s.Message = OK, "services running"
+	rs := []Result{r, s}
+	if b, ok := d.containerBuild(ctx, string(status)); ok {
+		rs = append(rs, b)
+	}
+	return rs
+}
+
+// runtimePlugins are where the Linux runtime plugin lives under
+// `paths.installRoot`: Homebrew's layout, then Apple's pkg.
+var runtimePlugins = []string{
+	"libexec/container-plugins/container-runtime-linux/bin/container-runtime-linux",
+	"libexec/container/plugins/container-runtime-linux/bin/container-runtime-linux",
+}
+
+// containerBuild reports how the container runtime plugin is signed. macOS
+// keys Local Network rules by binary, and Homebrew's ad-hoc-signed builds
+// get a fresh rule per version; kona's relay and node IPs don't need it.
+func (d *Doctor) containerBuild(ctx context.Context, status string) (Result, bool) {
+	var root string
+	for _, line := range strings.Split(status, "\n") {
+		if f := strings.Fields(line); len(f) == 2 && f[0] == "paths.installRoot" {
+			root = f[1]
+		}
+	}
+	if root == "" {
+		return Result{}, false
+	}
+	for _, rel := range runtimePlugins {
+		path := filepath.Join(root, rel)
+		if _, err := d.Stat(path); err != nil {
+			continue
+		}
+		r := Result{Name: "container-build", Status: OK}
+		// codesign prints the signature details on stderr.
+		out, _ := d.Runner.Run(ctx, "sh", "-c", `codesign -dv --verbose=2 "$1" 2>&1`, "sh", path)
+		team, adhoc := "", false
+		for _, line := range strings.Split(string(out), "\n") {
+			if v, ok := strings.CutPrefix(line, "TeamIdentifier="); ok && v != "not set" {
+				team = v
+			}
+			adhoc = adhoc || line == "Signature=adhoc"
+		}
+		switch {
+		case team != "":
+			r.Message = "runtime signed by team " + team
+		case adhoc:
+			r.Message = "ad-hoc signed (Homebrew build): its macOS Local Network rule is per version; " +
+				"if denied, TCP port publishing fails, but kona's relay and node IPs are unaffected (docs/failure-modes.md)"
+		default:
+			r.Message = "runtime signature unknown: " + path
+		}
+		return r, true
+	}
+	return Result{}, false
 }
 
 func (d *Doctor) kernel(path string) Result {
