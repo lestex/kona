@@ -1,0 +1,76 @@
+#!/bin/bash
+# kona node entrypoint (runs inside an Apple container VM).
+#
+# Environment (set by `kona create cluster`):
+#   KONA_NODE_IP     static node address with prefix, e.g. 192.168.70.10/24.
+#                    Added as a secondary on eth0 because `container` assigns
+#                    a different primary address on every run.
+#   KONA_REQUIRE     space-separated kernel features to verify at boot.
+# Arguments: the k3s command line (server|agent ...), exec'd as-is.
+set -euo pipefail
+
+log() { echo "kona-node: $*" >&2; }
+
+if [ -n "${KONA_NODE_IP:-}" ]; then
+  if ! ip -4 addr show dev eth0 | grep -q " ${KONA_NODE_IP%/*}/"; then
+    ip addr add "$KONA_NODE_IP" dev eth0
+  fi
+  # Tell the rest of the subnet right away; stale ARP entries from a
+  # previous node with this address would otherwise linger.
+  arping -c 2 -U -I eth0 "${KONA_NODE_IP%/*}" >/dev/null 2>&1 || true
+  log "node ip ${KONA_NODE_IP}"
+fi
+
+# Fail fast with the CONFIG_* name when the kernel lacks something.
+missing=()
+check() { # check <CONFIG_NAME> <test command...>
+  local name=$1; shift
+  "$@" >/dev/null 2>&1 || missing+=("$name")
+}
+check CONFIG_BRIDGE_NETFILTER test -d /proc/sys/net/bridge
+check CONFIG_OVERLAY_FS grep -qw overlay /proc/filesystems
+check CONFIG_CGROUPS test -f /sys/fs/cgroup/cgroup.controllers
+check CONFIG_NF_TABLES nft list tables
+check CONFIG_VXLAN ip link add kona-chk type vxlan id 1 dstport 4789
+ip link del kona-chk >/dev/null 2>&1 || true
+for feature in ${KONA_REQUIRE:-}; do
+  case $feature in
+    CONFIG_NET_SCH_INGRESS) check "$feature" tc qdisc add dev lo clsact; tc qdisc del dev lo clsact >/dev/null 2>&1 || true ;;
+    CONFIG_WIREGUARD) check "$feature" ip link add kona-wg type wireguard; ip link del kona-wg >/dev/null 2>&1 || true ;;
+    CONFIG_GENEVE) check "$feature" ip link add kona-gnv type geneve id 1 remote 127.0.0.1; ip link del kona-gnv >/dev/null 2>&1 || true ;;
+  esac
+done
+if [ ${#missing[@]} -gt 0 ]; then
+  log "kernel is missing required features: ${missing[*]}"
+  exit 78
+fi
+
+# cgroup v2 "no internal processes": the kubelet can only create kubepods
+# with domain controllers if the root cgroup holds no processes. Move
+# everything into /init and delegate all controllers to children.
+if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+  mkdir -p /sys/fs/cgroup/init
+  # Snapshot the list each round: iterating cgroup.procs while moving
+  # entries out of it skips pids.
+  for _ in 1 2 3 4 5; do
+    pids=$(cat /sys/fs/cgroup/cgroup.procs)
+    [ -z "$pids" ] && break
+    for pid in $pids; do
+      echo "$pid" > /sys/fs/cgroup/init/cgroup.procs 2>/dev/null || true
+    done
+  done
+  sed -e 's/ / +/g' -e 's/^/+/' /sys/fs/cgroup/cgroup.controllers \
+    > /sys/fs/cgroup/cgroup.subtree_control
+fi
+
+sysctl -qw net.ipv4.ip_forward=1
+sysctl -qw net.bridge.bridge-nf-call-iptables=1
+sysctl -qw net.bridge.bridge-nf-call-ip6tables=1
+sysctl -qw fs.inotify.max_user_instances=1024
+sysctl -qw fs.inotify.max_user_watches=524288
+
+# Guest clocks stop while the host sleeps; chrony steps them back.
+chronyd -f /etc/chrony.conf >/dev/null 2>&1 || log "chronyd failed to start"
+
+mkdir -p /var/lib/rancher/k3s/server/db
+exec /usr/local/bin/k3s "$@"

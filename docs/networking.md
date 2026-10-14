@@ -54,51 +54,53 @@ All of these come from real runs, in `spikes/03-net/*.txt` and [gates.md](gates.
 | (c) WireGuard overlay between nodes | **Works without root** | 0% loss both ways. The overlay preserves source IPs (tcpdump on `wg0` shows 10.99.0.x on both ends). With a 1500 underlay, the full 1420 MTU passes with DF. ~365 Mbit/s each way through the published-port proxy (the bottleneck is the proxy, not WireGuard). |
 | rejected: L2 relay through a "gateway" container (`--publish-socket` + krunkit `unixstream`) | Not pursued | vmnet filters per-VM MACs. It would need bridging/promiscuous mode inside a guest, is fragile, and still runs through a userspace hop. |
 
-## Chosen design: (c) kona-managed WireGuard mesh as the node network
+## Chosen design: static underlay node IPs, plus WireGuard between the two networks
+
+> Revised in Phase 1. The Phase 0 draft made `wg0` addresses the node IPs,
+> which would have sent CPU↔CPU traffic through WireGuard too. Now the node IP
+> is the static underlay address, and WireGuard only routes between the
+> `container` network and the GPU network.
 
 ```mermaid
 flowchart LR
   subgraph host[macOS host]
     subgraph cnet["container network kona-&lt;cluster&gt; (192.168.70.0/24, mtu 1500)"]
-      cp["control-plane-1<br/>eth0 .10 (static secondary)<br/>wg0 10.99.0.10"]
-      w1["worker-1<br/>eth0 .11<br/>wg0 10.99.0.11"]
+      cp["control-plane-1<br/>eth0 192.168.70.10 (static secondary)"]
+      w1["worker-1<br/>eth0 192.168.70.20"]
     end
-    subgraph gnet["vmnet-helper shared net (192.168.71.0/24)"]
-      g1["gpu-worker-1<br/>eth0 .10 (static)<br/>wg0 10.99.0.101"]
+    subgraph gnet["vmnet-helper shared net (GPU subnet, e.g. 192.168.170.0/24)"]
+      g1["gpu-worker-1<br/>eth0 .10 (static, cloud-init)"]
     end
     proxy(["container published UDP ports<br/>51820+N/udp on host"])
   end
-  cp <-- "direct L2 (wg endpoint 192.168.70.x)" --> w1
-  g1 -- "dials 192.168.71.1:51820+N" --> proxy --> cp & w1
+  cp <-- "direct L2, no tunnel" --> w1
+  g1 -- "wg0 → 192.168.x.1:51820+N" --> proxy --> cp & w1
 ```
 
-- **Node IP** = the static `wg0` address from `10.99.0.0/24` (configurable),
-  assigned by kona and stored in state. It's identical across reboots and
-  independent of vmnet DHCP/allocation. k3s: `--node-ip=<wg0> --flannel-iface=wg0`.
-  kubeadm: `--apiserver-advertise-address=<wg0>` on the control plane.
-- **Underlay addresses** are static too. Container nodes get a pinned MAC plus
-  a secondary static `eth0` address set by the node entrypoint (constraint 5),
-  and GPU nodes get a static cloud-init address. These are the WireGuard
-  endpoints and the address the host uses to reach the API server.
-- **Peering**: full mesh.
-  - CPU↔CPU: endpoints on the container network (direct L2, fast path).
-  - GPU↔GPU: endpoints on the vmnet-helper bridge (direct L2).
-  - GPU→CPU: every container node publishes its WireGuard port on the host
-    (`-p <51820+N>:51820/udp`; kona allocates N per cluster and records it in
-    state). GPU nodes dial `192.168.71.1:<port>` with `PersistentKeepalive=25`.
-    CPU nodes have no endpoint for GPU peers and learn it from the handshake.
-- **MTU budget**: underlay 1500 → `wg0` 1420 → flannel VXLAN 1370, or Cilium
-  VXLAN/Geneve 1370/1370. Cilium native routing on `wg0` is possible but
-  needs pod CIDRs in AllowedIPs. Phase 2 uses Cilium VXLAN over `wg0`, and
-  native routing stays an option.
-- **API server from the host**: `https://<control-plane static eth0>:6443`,
-  reachable directly because the host sits on the container bridge. No port
-  publish is needed. The kubeconfig uses that address, and the cert SANs
-  include it plus the `wg0` IP.
-- **No NAT between nodes** at the Kubernetes layer: node-to-node and
-  pod-to-pod traffic carries real 10.99.0.x / pod IPs inside the tunnel. The
-  only NAT is the published-port proxy *underneath* WireGuard on GPU↔CPU
-  paths.
+- **Node IP** = the node's static underlay address from the cluster /24
+  (`internal/netplan`): control planes at `.10+`, workers at `.20+`, the
+  registry at `.200`. The node entrypoint adds it as a secondary on `eth0`
+  (constraint 5). kona stores it in state, and it's identical across
+  recreates. k3s: `--node-ip <ip> --advertise-address <ip> --flannel-iface eth0`.
+  kubeadm: `--apiserver-advertise-address <ip>`.
+- **CPU↔CPU and GPU↔GPU**: direct L2 on their own vmnet bridge, with no
+  encapsulation other than the CNI's.
+- **CPU↔GPU (Phase 3)**: every GPU node runs `wg0` with one peer per CPU node.
+  The peer's `AllowedIPs` is that node's underlay /32 plus its pod CIDR. GPU
+  nodes dial the CPU node's WireGuard port, which is published on the host
+  (`-p <51820+N>:51820/udp`, N allocated per cluster and stored in state), at
+  their own gateway. CPU nodes get a route to the GPU subnet via `wg0` and
+  learn GPU endpoints from the handshake (`PersistentKeepalive=25`).
+- **MTU budget**: underlay 1500. On CPU↔GPU paths `wg0` is 1420, so the CNI
+  MTU is set cluster-wide to 1370 once GPU nodes exist, which covers
+  flannel/Cilium VXLAN on top of `wg0`. CPU-only clusters keep 1450.
+- **API server from the host**: `https://<control-plane static IP>:6443`,
+  reachable directly because the host sits on the container bridge (verified
+  in Phase 1, see [gates.md](gates.md)). There's no port publish. The cert SANs
+  include every control-plane IP and name.
+- **No NAT between nodes** at the Kubernetes layer. Inside the tunnel, packets
+  carry real node and pod IPs. The only NAT is the published-port proxy
+  *underneath* WireGuard on CPU↔GPU paths.
 - **No sudo** anywhere in this design.
 
 ### Trade-offs
