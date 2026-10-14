@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lestex/kona/internal/execx"
 )
@@ -214,6 +216,13 @@ func (c *Client) Run(ctx context.Context, s RunSpec) error {
 // Start boots a stopped container.
 func (c *Client) Start(ctx context.Context, name string) error {
 	_, err := c.run(ctx, "start", name)
+	return err
+}
+
+// Stop shuts a container down: SIGTERM to its init, SIGKILL after grace.
+// Stopped containers are not an error.
+func (c *Client) Stop(ctx context.Context, name string, grace time.Duration) error {
+	_, err := c.run(ctx, "stop", "--time", strconv.Itoa(int(grace.Seconds())), name)
 	return err
 }
 

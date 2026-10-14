@@ -16,6 +16,7 @@ import (
 const (
 	StatusOK       = "ok"
 	StatusDegraded = "degraded"
+	StatusStopped  = "stopped"
 	StatusOrphan   = "orphan"
 )
 
@@ -29,6 +30,19 @@ type Info struct {
 	Nodes   int      `json:"nodes"`
 	Running int      `json:"running"`
 	Issues  []string `json:"issues,omitempty"`
+}
+
+// allStopped reports whether every node's only issue is being stopped.
+func allStopped(issues []string, nodes int) bool {
+	if len(issues) != nodes || nodes == 0 {
+		return false
+	}
+	for _, is := range issues {
+		if !strings.HasSuffix(is, " stopped") {
+			return false
+		}
+	}
+	return true
 }
 
 // List returns every cluster with state plus orphans: resources labeled
@@ -99,7 +113,10 @@ func (m *Manager) List(ctx context.Context) ([]Info, error) {
 				i.Issues = append(i.Issues, "orphan vm "+vm)
 			}
 		}
-		if len(i.Issues) > 0 || s.Phase != state.PhaseReady {
+		switch {
+		case s.Phase == state.PhaseReady && i.Running == 0 && allStopped(i.Issues, len(s.Nodes)):
+			i.Status, i.Issues = StatusStopped, nil
+		case len(i.Issues) > 0 || s.Phase != state.PhaseReady:
 			i.Status = StatusDegraded
 		}
 		sort.Strings(i.Issues)

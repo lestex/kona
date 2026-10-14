@@ -44,6 +44,7 @@ type sim struct {
 	boot, reported map[string]string
 	lag            int
 	nodePolls      int
+	stopped        map[string]bool // containers that are stopped
 }
 
 func (s *sim) bootOf(n string) string {
@@ -68,7 +69,7 @@ func (s *sim) reportedBoot(n string) string {
 func newSim() *sim {
 	return &sim{networks: map[string]string{"default": "192.168.64.0/24"},
 		volumes: map[string]map[string]string{}, containers: map[string]map[string]string{},
-		boot: map[string]string{}, reported: map[string]string{}}
+		boot: map[string]string{}, reported: map[string]string{}, stopped: map[string]bool{}}
 }
 
 func labelsFrom(args []string) map[string]string {
@@ -127,7 +128,11 @@ func (s *sim) runner() *execx.Fake {
 			var cs []string
 			for n, l := range s.containers {
 				b, _ := json.Marshal(l)
-				cs = append(cs, fmt.Sprintf(`{"id":%q,"configuration":{"labels":%s},"status":{"state":"running"}}`, n, b))
+				st := "running"
+				if s.stopped[n] {
+					st = "stopped"
+				}
+				cs = append(cs, fmt.Sprintf(`{"id":%q,"configuration":{"labels":%s},"status":{"state":%q}}`, n, b, st))
 			}
 			return ok("[" + strings.Join(cs, ",") + "]")
 		case args[0] == "run":
@@ -136,6 +141,15 @@ func (s *sim) runner() *execx.Fake {
 				return execx.FakeResponse{Err: &execx.Error{Stderr: "boom", Err: errors.New("exit 1")}}, true
 			}
 			s.containers[name] = labelsFrom(args)
+			return ok("")
+		case args[0] == "stop":
+			s.stopped[args[len(args)-1]] = true
+			return ok("")
+		case args[0] == "start":
+			if s.stopped[args[1]] {
+				delete(s.stopped, args[1])
+				s.boot[args[1]] = s.bootOf(args[1]) + "+"
+			}
 			return ok("")
 		case args[0] == "rm":
 			delete(s.containers, args[2])
@@ -619,5 +633,57 @@ func TestGPULinkModes(t *testing.T) {
 				t.Fatalf("stored link %q", c.GPULink())
 			}
 		})
+	}
+}
+
+func TestStopThenStartCluster(t *testing.T) {
+	m, s, o := gpuSetup(t, true)
+	t.Cleanup(func() { m.Delete(context.Background(), "kona") })
+	if err := m.Create(context.Background(), o); err != nil {
+		t.Fatal(err)
+	}
+	c := mustLoad(t, m, "kona")
+	kn := m.krunkitNode(c, c.GPUNodes()[0])
+	inner := m.Container.Runner.(*execx.Fake)
+	inner.Calls = nil
+	if err := m.Stop(context.Background(), "kona"); err != nil {
+		t.Fatal(err)
+	}
+	if m.GPU.Running(kn) || len(s.stopped) != len(c.CPUNodes()) {
+		t.Fatalf("not everything stopped: gpu=%v containers=%v", m.GPU.Running(kn), s.stopped)
+	}
+	var order []string
+	for _, call := range inner.Calls {
+		if strings.HasPrefix(call, "container stop ") {
+			order = append(order, call[strings.LastIndex(call, " ")+1:])
+		}
+	}
+	if len(order) == 0 || order[len(order)-1] != "kona-control-plane-1" {
+		t.Fatalf("control plane must stop last: %v", order)
+	}
+	if !strings.Contains(strings.Join(s.killed, "|"), "wg-relay --cluster=kona ") {
+		t.Fatalf("relays not stopped: %v", s.killed)
+	}
+	infos, err := m.List(context.Background())
+	if err != nil || len(infos) != 1 || infos[0].Status != StatusStopped || len(infos[0].Issues) != 0 {
+		t.Fatalf("list after stop: %+v %v", infos, err)
+	}
+	if err := m.Stop(context.Background(), "kona"); err != nil { // idempotent
+		t.Fatal(err)
+	}
+	s.lag = 2
+	if err := m.Start(context.Background(), "kona", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if !m.GPU.Running(kn) || len(s.stopped) != 0 {
+		t.Fatalf("not resumed: gpu=%v stopped=%v", m.GPU.Running(kn), s.stopped)
+	}
+	for n := range s.containers {
+		if s.reported[n] != s.boot[n] {
+			t.Fatalf("Start returned before %s re-registered", n)
+		}
+	}
+	if infos, _ := m.List(context.Background()); infos[0].Status != StatusOK {
+		t.Fatalf("list after start: %+v", infos[0])
 	}
 }
