@@ -2,7 +2,7 @@
 include ../../versions.env
 
 REPO  ?= ghcr.io/lestex/kona-node
-# OCI tags cannot contain '+': v1.34.11+k3s1 -> v1.34.11-k3s1
+# OCI tags cannot contain '+': v1.37.0+k3s1 -> v1.37.0-k3s1
 TAG   := $(subst +,-,$(K3S_VERSION))
 IMAGE := $(REPO):$(TAG)
 KUBEADM_IMAGE := $(REPO):$(KUBERNETES_VERSION)-kubeadm
