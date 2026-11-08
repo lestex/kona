@@ -6,14 +6,25 @@
 #                    Added as a secondary on eth0 because `container` assigns
 #                    a different primary address on every run.
 #   KONA_REQUIRE     space-separated kernel features to verify at boot.
-# Arguments: the k3s command line (server|agent ...), exec'd as-is.
+#   KONA_INIT        "systemd" (kubeadm image): exec /sbin/init as PID 1.
+#                    Otherwise the arguments are the k3s command line.
 set -euo pipefail
 
 log() { echo "kona-node: $*" >&2; }
 
 if [ -n "${KONA_NODE_IP:-}" ]; then
   if ! ip -4 addr show dev eth0 | grep -q " ${KONA_NODE_IP%/*}/"; then
+    # Make the static address the *primary* one: tools that take "the
+    # interface address" (flannel --iface, source address selection) must
+    # see the node IP, not `container`'s per-run allocation. The dynamic
+    # address is re-added as a secondary so `container`'s own port
+    # publishing (which targets it) keeps working.
+    dyn=$(ip -4 -o addr show dev eth0 | awk '{print $4}' | head -1)
+    gw=$(ip -4 route show default | awk '{print $3; exit}')
+    [ -n "$dyn" ] && ip addr del "$dyn" dev eth0
     ip addr add "$KONA_NODE_IP" dev eth0
+    [ -n "$dyn" ] && ip addr add "$dyn" dev eth0
+    [ -n "$gw" ] && ip route replace default via "$gw" dev eth0 src "${KONA_NODE_IP%/*}"
   fi
   # Tell the rest of the subnet right away; stale ARP entries from a
   # previous node with this address would otherwise linger.
@@ -48,7 +59,8 @@ fi
 # cgroup v2 "no internal processes": the kubelet can only create kubepods
 # with domain controllers if the root cgroup holds no processes. Move
 # everything into /init and delegate all controllers to children.
-if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+# systemd (kubeadm image) manages the root cgroup itself.
+if [ "${KONA_INIT:-}" != systemd ] && [ -f /sys/fs/cgroup/cgroup.controllers ]; then
   mkdir -p /sys/fs/cgroup/init
   # Snapshot the list each round: iterating cgroup.procs while moving
   # entries out of it skips pids.
@@ -68,6 +80,14 @@ sysctl -qw net.bridge.bridge-nf-call-iptables=1
 sysctl -qw net.bridge.bridge-nf-call-ip6tables=1
 sysctl -qw fs.inotify.max_user_instances=1024
 sysctl -qw fs.inotify.max_user_watches=524288
+
+if [ "${KONA_INIT:-}" = systemd ]; then
+  # kubelet reads the node IP from here (10-kubeadm.conf drop-in).
+  if [ -n "${KONA_NODE_IP:-}" ]; then
+    echo "KUBELET_EXTRA_ARGS=--node-ip=${KONA_NODE_IP%/*}" > /etc/default/kubelet
+  fi
+  exec /sbin/init
+fi
 
 # Guest clocks stop while the host sleeps; chrony steps them back.
 chronyd -f /etc/chrony.conf >/dev/null 2>&1 || log "chronyd failed to start"

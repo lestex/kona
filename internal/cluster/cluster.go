@@ -3,8 +3,6 @@ package cluster
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,17 +15,17 @@ import (
 
 	"github.com/lestex/kona/internal/distro"
 	"github.com/lestex/kona/internal/distro/k3s"
+	"github.com/lestex/kona/internal/distro/kubeadm"
 	"github.com/lestex/kona/internal/kubeconfig"
 	"github.com/lestex/kona/internal/netplan"
 	"github.com/lestex/kona/internal/runtime/container"
 	"github.com/lestex/kona/internal/state"
-	"github.com/lestex/kona/internal/version"
 )
 
 const (
-	tokenFile        = "token"
+	secretsFile      = "secrets.json"
+	legacyTokenFile  = "token"
 	dataVolumeSize   = "10G"
-	dataMountPath    = "/var/lib/rancher/k3s/server/db"
 	nodeMTU          = 1500
 	pollInterval     = 2 * time.Second
 	memoryWarnFactor = 0.75
@@ -87,19 +85,33 @@ func DistroFor(name string) (distro.Distro, error) {
 	case "k3s":
 		return k3s.K3s{}, nil
 	case "kubeadm":
-		return nil, errors.New("--distro kubeadm is not implemented yet (Phase 1b); use --distro k3s")
+		return kubeadm.Kubeadm{}, nil
 	default:
 		return nil, fmt.Errorf("unknown distro %q (want k3s or kubeadm)", name)
 	}
 }
 
-// DefaultImage returns the node image for the pinned distro version.
+// DefaultImage returns the node image for a distro at the pinned version,
+// or at k8sVersion when set.
 func DefaultImage(distroName, k8sVersion string) string {
-	tag := strings.ReplaceAll(version.Get("K3S_VERSION"), "+", "-")
-	if k8sVersion != "" && !strings.HasPrefix(version.Get("K3S_VERSION"), k8sVersion+"+") {
-		tag = k8sVersion + "-k3s1"
+	d, err := DistroFor(distroName)
+	if err != nil {
+		return ""
 	}
-	return "ghcr.io/lestex/kona-node:" + tag
+	img := d.DefaultImage()
+	if k8sVersion == "" {
+		return img
+	}
+	repo, tag, _ := strings.Cut(img, ":")
+	switch distroName {
+	case "k3s":
+		if !strings.HasPrefix(tag, k8sVersion+"-") {
+			tag = k8sVersion + "-k3s1"
+		}
+	case "kubeadm":
+		tag = k8sVersion + "-kubeadm"
+	}
+	return repo + ":" + tag
 }
 
 // NetworkName is the `container` network of a cluster.
@@ -151,7 +163,7 @@ func (m *Manager) Create(ctx context.Context, o CreateOptions) (err error) {
 	}()
 
 	deadline := m.Now().Add(o.Wait)
-	token, err := m.token(c.Name)
+	secrets, err := m.secrets(c.Name, d)
 	if err != nil {
 		return err
 	}
@@ -164,7 +176,7 @@ func (m *Manager) Create(ctx context.Context, o CreateOptions) (err error) {
 	}
 
 	cps := c.ControlPlanes()
-	if err := m.ensureNode(ctx, d, c, cps[0], token, existing); err != nil {
+	if err := m.ensureNode(ctx, d, c, cps[0], secrets, existing); err != nil {
 		return err
 	}
 	m.logf("• Waiting for the API server on %s", cps[0].IP)
@@ -172,7 +184,7 @@ func (m *Manager) Create(ctx context.Context, o CreateOptions) (err error) {
 		return err
 	}
 	for _, n := range cps[1:] { // etcd members join one at a time
-		if err := m.ensureNode(ctx, d, c, n, token, existing); err != nil {
+		if err := m.ensureNode(ctx, d, c, n, secrets, existing); err != nil {
 			return err
 		}
 		if err := m.waitNodesReady(ctx, d, c, nodeNames(cps), deadline, false); err != nil {
@@ -183,7 +195,7 @@ func (m *Manager) Create(ctx context.Context, o CreateOptions) (err error) {
 		if n.Role == state.RoleControlPlane {
 			continue
 		}
-		if err := m.ensureNode(ctx, d, c, n, token, existing); err != nil {
+		if err := m.ensureNode(ctx, d, c, n, secrets, existing); err != nil {
 			return err
 		}
 	}
@@ -205,6 +217,9 @@ func (m *Manager) Create(ctx context.Context, o CreateOptions) (err error) {
 
 func validate(o CreateOptions) error {
 	if err := state.ValidateName(o.Name); err != nil {
+		return err
+	}
+	if _, err := DistroFor(o.Distro); err != nil {
 		return err
 	}
 	if o.ControlPlanes < 1 {
@@ -311,18 +326,29 @@ func (m *Manager) warnMemory(c *state.Cluster, hostMem int64) {
 	}
 }
 
-func (m *Manager) token(cluster string) (string, error) {
-	if b, err := m.Store.ReadSecret(cluster, tokenFile); err == nil {
-		return strings.TrimSpace(string(b)), nil
+func (m *Manager) secrets(cluster string, d distro.Distro) (distro.Secrets, error) {
+	if b, err := m.Store.ReadSecret(cluster, secretsFile); err == nil {
+		var s distro.Secrets
+		if err := json.Unmarshal(b, &s); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", secretsFile, err)
+		}
+		return s, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", err
+		return nil, err
 	}
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
+	// Clusters created before secrets.json kept the k3s token alone.
+	if b, err := m.Store.ReadSecret(cluster, legacyTokenFile); err == nil {
+		return distro.Secrets{k3s.SecretToken: strings.TrimSpace(string(b))}, nil
 	}
-	tok := hex.EncodeToString(buf)
-	return tok, m.Store.WriteSecret(cluster, tokenFile, []byte(tok+"\n"))
+	s, err := d.NewSecrets()
+	if err != nil {
+		return nil, err
+	}
+	b, err := json.Marshal(s)
+	if err != nil {
+		return nil, err
+	}
+	return s, m.Store.WriteSecret(cluster, secretsFile, b)
 }
 
 func (m *Manager) ensureNetwork(ctx context.Context, c *state.Cluster) error {
@@ -358,11 +384,15 @@ func (m *Manager) containersOf(ctx context.Context, cluster string) (map[string]
 }
 
 func (m *Manager) ensureNode(ctx context.Context, d distro.Distro, c *state.Cluster, n state.Node,
-	token string, existing map[string]container.Container) error {
+	secrets distro.Secrets, existing map[string]container.Container) error {
+	spec, err := d.NodeSpec(c, n, secrets)
+	if err != nil {
+		return err
+	}
 	if ex, ok := existing[n.Name]; ok {
 		if ex.Status.State == "running" {
 			m.logf("✓ Node %s already running", n.Name)
-			return nil
+			return d.Bootstrap(ctx, m.Container, c, n, secrets)
 		}
 		if err := m.Container.Delete(ctx, n.Name); err != nil {
 			return err
@@ -384,20 +414,21 @@ func (m *Manager) ensureNode(ctx context.Context, d distro.Distro, c *state.Clus
 				return err
 			}
 		}
-		vols[n.Volume] = dataMountPath
+		vols[n.Volume] = spec.DataDir
 	}
-	args, err := d.NodeArgs(c, n, token)
-	if err != nil {
+	env := map[string]string{"KONA_NODE_IP": fmt.Sprintf("%s/%d", n.IP, c.Network.Prefix)}
+	for k, v := range spec.Env {
+		env[k] = v
+	}
+	m.logf("• Starting %s (%s, %d CPU, %s)", n.Name, n.IP, n.CPUs, n.Memory)
+	if err := m.Container.Run(ctx, container.RunSpec{
+		Name: n.Name, Init: spec.UseInit, Tmpfs: spec.Tmpfs, Image: c.Image, Kernel: c.Kernel,
+		Network: c.Network.Name, MAC: n.MAC, MTU: nodeMTU, DNS: c.DNS, CPUs: n.CPUs, Memory: n.Memory,
+		Env: env, Labels: labels, Volumes: vols, Args: spec.Args,
+	}); err != nil {
 		return err
 	}
-	env := d.NodeEnv(c, n, token)
-	env["KONA_NODE_IP"] = fmt.Sprintf("%s/%d", n.IP, c.Network.Prefix)
-	m.logf("• Starting %s (%s, %d CPU, %s)", n.Name, n.IP, n.CPUs, n.Memory)
-	return m.Container.Run(ctx, container.RunSpec{
-		Name: n.Name, Image: c.Image, Kernel: c.Kernel, Network: c.Network.Name,
-		MAC: n.MAC, MTU: nodeMTU, DNS: c.DNS, CPUs: n.CPUs, Memory: n.Memory,
-		Env: env, Labels: labels, Volumes: vols, Args: args,
-	})
+	return d.Bootstrap(ctx, m.Container, c, n, secrets)
 }
 
 func (m *Manager) waitAPI(ctx context.Context, d distro.Distro, c *state.Cluster, deadline time.Time) error {
