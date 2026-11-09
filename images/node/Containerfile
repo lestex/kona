@@ -1,6 +1,5 @@
-# kona node image for Apple `container` (k3s distro).
-# Same distro base as the krunkit GPU node image (Fedora), so both node
-# kinds share userland. Versions are passed from versions.env by the Makefile.
+# kona node image for Apple `container` (k3s distro), on Fedora.
+# Versions are passed from versions.env by the Makefile.
 ARG FEDORA_DIGEST
 FROM docker.io/library/fedora:44@${FEDORA_DIGEST}
 
@@ -10,7 +9,7 @@ ARG K3S_AIRGAP_SHA256
 
 RUN dnf -y install --setopt=install_weak_deps=False \
       ca-certificates chrony conntrack-tools ethtool iproute iptables-nft \
-      iputils kmod nftables procps-ng util-linux wireguard-tools zstd \
+      iputils kmod nftables procps-ng util-linux zstd \
  && dnf clean all \
  && sed -i 's/^makestep .*/makestep 1 -1/' /etc/chrony.conf
 # ^ step the clock whenever it is >1s off, not only at boot: guest clocks
@@ -28,7 +27,7 @@ RUN set -eu; v=$(printf %s "$K3S_VERSION" | sed 's/+/%2B/'); \
       "$base/k3s-airgap-images-arm64.tar.zst"; \
     echo "$K3S_AIRGAP_SHA256  /var/lib/rancher/k3s/agent/images/k3s-airgap-images-arm64.tar.zst" | sha256sum -c -
 
-COPY kona-node kona-wg /usr/local/bin/
-RUN chmod 0755 /usr/local/bin/kona-node /usr/local/bin/kona-wg
+COPY kona-node /usr/local/bin/
+RUN chmod 0755 /usr/local/bin/kona-node
 
 ENTRYPOINT ["/usr/local/bin/kona-node"]

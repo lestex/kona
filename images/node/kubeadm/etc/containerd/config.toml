@@ -2,8 +2,7 @@
 version = 3
 
 [plugins.'io.containerd.cri.v1.runtime']
-  # CDI is on by default in containerd 2.x; kept explicit because GPU nodes
-  # rely on it (kona-venus-dra writes specs to /var/run/cdi).
+  # CDI is on by default in containerd 2.x; kept explicit.
   enable_cdi = true
   cdi_spec_dirs = ['/etc/cdi', '/var/run/cdi']
 
