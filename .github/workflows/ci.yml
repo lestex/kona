@@ -37,6 +37,16 @@ jobs:
           done
       - name: build
         run: make build && ./bin/kona version
+      # The release build, so one that stopped working is found before a
+      # tag depends on it.
+      - name: release build
+        run: make -s release-env >> "$GITHUB_ENV"
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          version: "~> v2"
+          args: build --snapshot --clean
+      - name: release binary runs
+        run: dist/kona_darwin_arm64*/kona version
       - name: shellcheck
         run: |
           brew install shellcheck
