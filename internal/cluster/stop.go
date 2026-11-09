@@ -2,9 +2,11 @@ package cluster
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
+	"github.com/lestex/kona/internal/runtime/container"
 	"github.com/lestex/kona/internal/state"
 )
 
@@ -36,6 +38,11 @@ func (m *Manager) StopNodes(ctx context.Context, name string, names []string) er
 	if err != nil {
 		return err
 	}
+	if len(names) > 0 {
+		if err := keepsQuorum(c, want, existing); err != nil {
+			return err
+		}
+	}
 	stopped := 0
 	for _, controlPlanes := range []bool{false, true} {
 		for _, n := range c.Nodes {
@@ -62,4 +69,29 @@ func (m *Manager) StopNodes(ctx context.Context, name string, names []string) er
 	}
 	m.logf("✓ Stopped %d node(s) of %q; resume with: kona start cluster %s", stopped, name, name)
 	return nil
+}
+
+// keepsQuorum refuses a `stop node` that would leave fewer running control
+// planes than etcd quorum (a majority; 1 of 1 for a single control plane):
+// the API would go down with them. Stopping the whole cluster is the way to
+// take the API down on purpose.
+func keepsQuorum(c *state.Cluster, want map[string]bool, existing map[string]container.Container) error {
+	cps := c.ControlPlanes()
+	left := 0
+	var named []string
+	for _, n := range cps {
+		if want[n.Name] {
+			named = append(named, n.Name)
+			continue
+		}
+		if ct, ok := existing[n.Name]; ok && ct.Status.State == "running" {
+			left++
+		}
+	}
+	quorum := len(cps)/2 + 1
+	if len(named) == 0 || left >= quorum {
+		return nil
+	}
+	return fmt.Errorf("stopping %s would leave %d of %d control planes running (the API needs %d); "+
+		"stop the whole cluster with `kona stop cluster %s`", strings.Join(named, ", "), left, len(cps), quorum, c.Name)
 }
