@@ -52,6 +52,15 @@ func (m *Manager) StopNodes(ctx context.Context, name string, names []string) er
 			stopped++
 		}
 	}
+	// The registry goes last, with the whole cluster only.
+	if r := c.Registry; r != nil && len(names) == 0 {
+		if ct, ok := existing[r.Name]; ok && ct.Status.State == "running" {
+			m.logf("• Stopping %s", r.Name)
+			if err := m.Container.Stop(ctx, r.Name, StopGrace); err != nil {
+				return err
+			}
+		}
+	}
 	if stopped == 0 {
 		m.logf("✓ %s already stopped", describeNodes(name, names))
 		return nil

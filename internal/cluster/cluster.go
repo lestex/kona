@@ -45,7 +45,9 @@ type Manager struct {
 	Tools *tools.Cache
 	// HostDial is verify's host probe (nil: a real TCP dial).
 	HostDial func(addr string) error
-	Log      io.Writer
+	// RegistryProbe checks kona-registry's API from the host (nil: HTTP).
+	RegistryProbe func(ip string) error
+	Log           io.Writer
 	// HostPrefixes returns host interface subnets (overridable in tests).
 	HostPrefixes func() []netip.Prefix
 	// Now and Sleep are overridable in tests.
@@ -458,7 +460,10 @@ func (m *Manager) ensureNode(ctx context.Context, d distro.Distro, c *state.Clus
 	if ex, ok := existing[n.Name]; ok {
 		if ex.Status.State == "running" {
 			m.logf("✓ Node %s already running", n.Name)
-			return d.Bootstrap(ctx, m.Container, c, n, secrets)
+			if err := d.Bootstrap(ctx, m.Container, c, n, secrets); err != nil {
+				return err
+			}
+			return m.writeMirrors(ctx, d, c, n)
 		}
 		if err := m.Container.Delete(ctx, n.Name); err != nil {
 			return err
@@ -467,18 +472,8 @@ func (m *Manager) ensureNode(ctx context.Context, d distro.Distro, c *state.Clus
 	labels := map[string]string{container.LabelCluster: c.Name, container.LabelRole: n.Role}
 	vols := map[string]string{}
 	if n.Volume != "" {
-		have, err := m.Container.Volumes(ctx)
-		if err != nil {
+		if err := m.ensureVolume(ctx, n.Volume, dataVolumeSize, labels); err != nil {
 			return err
-		}
-		found := false
-		for _, v := range have {
-			found = found || v.ID == n.Volume
-		}
-		if !found {
-			if err := m.Container.CreateVolume(ctx, n.Volume, dataVolumeSize, labels); err != nil {
-				return err
-			}
 		}
 		vols[n.Volume] = spec.DataDir
 	}
@@ -494,7 +489,25 @@ func (m *Manager) ensureNode(ctx context.Context, d distro.Distro, c *state.Clus
 	}); err != nil {
 		return err
 	}
-	return d.Bootstrap(ctx, m.Container, c, n, secrets)
+	if err := d.Bootstrap(ctx, m.Container, c, n, secrets); err != nil {
+		return err
+	}
+	// Nodes added after `kona load image` mirror the same registries.
+	return m.writeMirrors(ctx, d, c, n)
+}
+
+// ensureVolume creates a block volume unless it exists.
+func (m *Manager) ensureVolume(ctx context.Context, name, size string, labels map[string]string) error {
+	have, err := m.Container.Volumes(ctx)
+	if err != nil {
+		return err
+	}
+	for _, v := range have {
+		if v.ID == name {
+			return nil
+		}
+	}
+	return m.Container.CreateVolume(ctx, name, size, labels)
 }
 
 func (m *Manager) waitAPI(ctx context.Context, d distro.Distro, c *state.Cluster, deadline time.Time) error {

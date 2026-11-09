@@ -39,6 +39,12 @@ func (m *Manager) StartNodes(ctx context.Context, name string, names []string, w
 		return err
 	}
 	deadline := m.Now().Add(wait)
+	// The registry first: nodes pull loaded images from it.
+	if c.Registry != nil && len(names) == 0 {
+		if err := m.ensureRegistry(ctx, c); err != nil {
+			return err
+		}
+	}
 	rebooted := map[string]bool{}
 	// Control planes first: agents need the API.
 	for _, controlPlanes := range []bool{true, false} {

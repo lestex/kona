@@ -56,17 +56,30 @@ type Network struct {
 
 // Cluster is the persisted inventory.
 type Cluster struct {
-	Name       string    `json:"name"`
-	Distro     string    `json:"distro"`
-	CNI        string    `json:"cni"`
-	K8sVersion string    `json:"k8sVersion"`
-	Image      string    `json:"image"`
-	Kernel     string    `json:"kernel"`
-	DNS        string    `json:"dns"`
-	Phase      string    `json:"phase"`
-	Network    Network   `json:"network"`
-	Nodes      []Node    `json:"nodes"`
-	CreatedAt  time.Time `json:"createdAt"`
+	Name       string  `json:"name"`
+	Distro     string  `json:"distro"`
+	CNI        string  `json:"cni"`
+	K8sVersion string  `json:"k8sVersion"`
+	Image      string  `json:"image"`
+	Kernel     string  `json:"kernel"`
+	DNS        string  `json:"dns"`
+	Phase      string  `json:"phase"`
+	Network    Network `json:"network"`
+	Nodes      []Node  `json:"nodes"`
+	// Registry is the cluster's kona-registry, created by the first
+	// `kona load image` (nil until then).
+	Registry  *Registry `json:"registry,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// Registry is a cluster's image registry VM and the upstream registry
+// hosts its nodes mirror through it.
+type Registry struct {
+	Name   string   `json:"name"`
+	IP     string   `json:"ip"`
+	MAC    string   `json:"mac"`
+	Volume string   `json:"volume"`
+	Hosts  []string `json:"hosts,omitempty"`
 }
 
 // ControlPlanes returns the control-plane nodes in order.

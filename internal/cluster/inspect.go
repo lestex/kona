@@ -106,7 +106,7 @@ func (m *Manager) List(ctx context.Context) ([]Info, error) {
 			}
 		}
 		for vm := range running[s.Name] {
-			if _, ok := s.Node(vm); !ok {
+			if _, ok := s.Node(vm); !ok && (s.Registry == nil || vm != s.Registry.Name) {
 				i.Issues = append(i.Issues, "orphan vm "+vm)
 			}
 		}
