@@ -1,11 +1,14 @@
 package cluster
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -684,5 +687,103 @@ func TestCreateFailsWhenSystemPodsCrash(t *testing.T) {
 	}
 	if len(s.containers) != 0 {
 		t.Fatalf("not rolled back: %v", s.containers)
+	}
+}
+
+func TestSupportBundleRedactsSecrets(t *testing.T) {
+	m, _, _, o := setup(t)
+	if err := m.Create(context.Background(), o); err != nil {
+		t.Fatal(err)
+	}
+	b, err := m.Store.ReadSecret("kona", secretsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sec map[string]string
+	json.Unmarshal(b, &sec)
+	token := sec["token"]
+	if len(token) < 8 {
+		t.Fatalf("no token in %s", b)
+	}
+	// A node log that happens to print the join token.
+	m.Host.(*execx.Fake).Match = func(line string) (execx.FakeResponse, bool) {
+		if strings.HasPrefix(line, "container logs ") {
+			return execx.FakeResponse{Out: []byte("joining with token " + token + "\n")}, true
+		}
+		return execx.FakeResponse{}, false
+	}
+	var buf bytes.Buffer
+	if err := m.SupportBundle(context.Background(), "kona", &buf, map[string][]byte{"version.txt": []byte("kona dev")}); err != nil {
+		t.Fatal(err)
+	}
+	gz, err := gzip.NewReader(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := tar.NewReader(gz)
+	got := map[string]string{}
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(tr)
+		got[h.Name] = string(body)
+	}
+	root := "kona-kona-support/"
+	for _, f := range []string{"cluster.json", "verify.json", "nodes.json", "version.txt", "container/ls.txt",
+		"nodes/kona-worker-1/container-logs.txt", "nodes/kona-worker-1/ip.txt", "kubernetes/pods.txt"} {
+		if _, ok := got[root+f]; !ok {
+			t.Errorf("bundle lacks %s", f)
+		}
+	}
+	for name, body := range got {
+		if strings.Contains(body, token) {
+			t.Errorf("%s leaks the join token", name)
+		}
+		if strings.Contains(name, "secret") || strings.Contains(name, "kubeconfig") {
+			t.Errorf("bundle includes %s", name)
+		}
+	}
+	if !strings.Contains(got[root+"nodes/kona-worker-1/container-logs.txt"], "joining with token "+redacted) {
+		t.Errorf("log not redacted: %q", got[root+"nodes/kona-worker-1/container-logs.txt"])
+	}
+}
+
+func TestStopNodeKeepsControlPlaneQuorum(t *testing.T) {
+	m, s, _, o := setup(t)
+	if err := m.Create(context.Background(), o); err != nil {
+		t.Fatal(err)
+	}
+	err := m.StopNodes(context.Background(), "kona", []string{"kona-control-plane-1"})
+	if err == nil || !strings.Contains(err.Error(), "kona stop cluster kona") || len(s.stopped) != 0 {
+		t.Fatalf("stopping the only control plane: err=%v stopped=%v", err, s.stopped)
+	}
+	if err := m.StopNodes(context.Background(), "kona", []string{"kona-worker-1"}); err != nil {
+		t.Fatalf("workers can still be stopped: %v", err)
+	}
+	if err := m.Stop(context.Background(), "kona"); err != nil {
+		t.Fatalf("stop cluster is always allowed: %v", err)
+	}
+}
+
+func TestKeepsQuorumHA(t *testing.T) {
+	c := &state.Cluster{Name: "ha"}
+	running := map[string]container.Container{}
+	for i := 1; i <= 3; i++ {
+		n := fmt.Sprintf("ha-control-plane-%d", i)
+		c.Nodes = append(c.Nodes, state.Node{Name: n, Role: state.RoleControlPlane})
+		ct := container.Container{ID: n}
+		ct.Status.State = "running"
+		running[n] = ct
+	}
+	if err := keepsQuorum(c, map[string]bool{"ha-control-plane-1": true}, running); err != nil {
+		t.Fatalf("1 of 3 down keeps quorum: %v", err)
+	}
+	if err := keepsQuorum(c, map[string]bool{"ha-control-plane-1": true, "ha-control-plane-2": true}, running); err == nil {
+		t.Fatal("2 of 3 down breaks quorum")
 	}
 }

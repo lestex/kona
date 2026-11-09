@@ -4,7 +4,7 @@
 |---|---|
 | `kona stop cluster [NAME]` | Stops every node and keeps VMs, disks and state. Order: workers, then control planes, so agents never outlive the API. `container` nodes get `container stop --time 30`, so init shuts k3s/kubelet down cleanly. |
 | `kona start cluster [NAME] [--wait 5m]` | Boots stopped nodes, control planes first, then waits until `kona verify cluster` passes. |
-| `kona stop node NODE... [--name NAME]` | Stops just those nodes. |
+| `kona stop node NODE... [--name NAME]` | Stops just those nodes. Refuses to stop control planes if fewer than etcd quorum (a majority, so the only one in a single-control-plane cluster) would stay running, since the API would go down; use `kona stop cluster` for that. |
 | `kona start node NODE... [--name NAME] [--wait 5m]` | Boots just those nodes and waits for them, and for the cluster, to be healthy. |
 | `kona verify cluster [NAME] [-o json\|yaml]` | Read-only health checks. Exits 1 if any check fails. |
 
@@ -48,3 +48,19 @@ data. Clusters made by an older kona with GPU nodes are refused by `start`,
 Not done here: `stop node` doesn't cordon or drain. Stopping a node is like
 pulling its power, and pods on it are rescheduled by the usual node-lifecycle
 timeouts.
+
+## Support bundle
+
+`kona support bundle [NAME] [-o FILE]` writes a `.tar.gz` for debugging:
+`cluster.json`, `kona version`, `kona doctor`, the `verify` report, `get
+nodes`, `container`'s view (version, system status, VMs, networks, volumes),
+the host's macOS version and DNS configuration, and per node its `container
+logs`, IP/route/resolver config, `dmesg`, processes, disk usage and (on
+kubeadm nodes) the kubelet/containerd journal. From the control plane it adds
+nodes, pods, DaemonSets, events and `kubectl describe nodes`.
+
+It only reads. A step that fails records its error in its file instead of
+stopping the bundle. Secrets files and the kubeconfig are never included,
+and the cluster's secret values (join tokens) are replaced with `<redacted>`
+wherever they appear in collected output. Review the bundle before sharing
+it: logs can still contain hostnames and IPs.
