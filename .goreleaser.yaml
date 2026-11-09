@@ -59,7 +59,7 @@ homebrew_casks:
       # Not GITHUB_TOKEN: that one is scoped to this repository, and the
       # tap is a different one. See docs/release.md.
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    homepage: https://github.com/lestex/kona
+    homepage: https://lestex.github.io/kona/
     description: Kubernetes clusters on Apple silicon, one Apple container VM per node
     binaries: [kona]
     # The runtime kona drives. homebrew-core's formula, as docs/versions.md
