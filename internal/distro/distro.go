@@ -47,4 +47,7 @@ type Distro interface {
 	AdminKubeconfig(ctx context.Context, x Execer, c *state.Cluster) ([]byte, error)
 	// Kubectl returns the command that runs kubectl as admin on a control plane.
 	Kubectl(args ...string) []string
+	// RegistryHostsDir is containerd's registry config_path on a node: one
+	// <host>/hosts.toml per mirrored registry, read on every pull.
+	RegistryHostsDir() string
 }

@@ -156,6 +156,8 @@ type RunSpec struct {
 	Labels  map[string]string
 	Volumes map[string]string // volume name -> mount path
 	Args    []string          // arguments to the image entrypoint
+	// Entrypoint replaces the image's entrypoint ("" keeps it).
+	Entrypoint string
 }
 
 // RunArgs returns the `container run` arguments for spec.
@@ -199,6 +201,9 @@ func RunArgs(s RunSpec) []string {
 	for _, k := range sortedKeys(s.Volumes) {
 		args = append(args, "-v", k+":"+s.Volumes[k])
 	}
+	if s.Entrypoint != "" {
+		args = append(args, "--entrypoint", s.Entrypoint)
+	}
 	args = append(args, s.Image)
 	return append(args, s.Args...)
 }
@@ -219,6 +224,32 @@ func (c *Client) Start(ctx context.Context, name string) error {
 // Stopped containers are not an error.
 func (c *Client) Stop(ctx context.Context, name string, grace time.Duration) error {
 	_, err := c.run(ctx, "stop", "--time", strconv.Itoa(int(grace.Seconds())), name)
+	return err
+}
+
+// ImageExists reports whether ref is in the local image store.
+func (c *Client) ImageExists(ctx context.Context, ref string) bool {
+	_, err := c.run(ctx, "image", "inspect", ref)
+	return err == nil
+}
+
+// TagImage adds the reference dst to the local image src.
+func (c *Client) TagImage(ctx context.Context, src, dst string) error {
+	_, err := c.run(ctx, "image", "tag", src, dst)
+	return err
+}
+
+// PushImage pushes ref over plain HTTP (kona-registry has no TLS). Only the
+// linux/arm64 variant is pushed: a pulled multi-platform image holds just
+// the host's variant, and pushing the whole index fails on missing content.
+func (c *Client) PushImage(ctx context.Context, ref string) error {
+	_, err := c.run(ctx, "image", "push", "--scheme", "http", "--progress", "none", "--platform", "linux/arm64", ref)
+	return err
+}
+
+// RemoveImage removes the local reference ref.
+func (c *Client) RemoveImage(ctx context.Context, ref string) error {
+	_, err := c.run(ctx, "image", "rm", ref)
 	return err
 }
 

@@ -308,3 +308,7 @@ func (Kubeadm) AdminKubeconfig(ctx context.Context, x distro.Execer, c *state.Cl
 func (Kubeadm) Kubectl(args ...string) []string {
 	return append([]string{"kubectl", "--kubeconfig", AdminKubeconfigPath}, args...)
 }
+
+// RegistryHostsDir implements distro.Distro (config_path in the image's
+// /etc/containerd/config.toml).
+func (Kubeadm) RegistryHostsDir() string { return "/etc/containerd/certs.d" }

@@ -63,6 +63,10 @@ func (m *Manager) SupportBundle(ctx context.Context, name string, w io.Writer, e
 		add(file, res(host(args...)))
 	}
 
+	if c.Registry != nil {
+		add("registry/container-logs.txt", res(host("container", "logs", c.Registry.Name)))
+	}
+
 	d, derr := DistroFor(c.Distro)
 	for _, n := range c.Nodes {
 		dir := "nodes/" + n.Name + "/"

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lestex/kona/internal/runtime/container"
 	"github.com/lestex/kona/internal/state"
 )
 
@@ -127,6 +128,8 @@ func (m *Manager) Verify(ctx context.Context, name string) (Report, error) {
 	} else {
 		r.add("vms", CheckPass, fmt.Sprintf("%d node VMs running", len(c.Nodes)), "")
 	}
+	m.verifyRegistry(&r, c, cs)
+
 	// API, from the host (what kubectl uses) and inside the control plane.
 	cp := c.ControlPlanes()[0]
 	if err := m.hostDial(net.JoinHostPort(cp.IP, "6443")); err != nil {
@@ -287,6 +290,27 @@ func (m *Manager) verifyClock(ctx context.Context, r *Report, c *state.Cluster, 
 	default:
 		r.add("clock", CheckPass, fmt.Sprintf("worst skew %.2fs", worst), "")
 	}
+}
+
+func (m *Manager) verifyRegistry(r *Report, c *state.Cluster, cs map[string]container.Container) {
+	reg := c.Registry
+	if reg == nil {
+		r.add("registry", CheckSkip, "no kona-registry yet (created by `kona load image`)", "")
+		return
+	}
+	if ct, ok := cs[reg.Name]; !ok || ct.Status.State != "running" {
+		r.add("registry", CheckFail, reg.Name+" is not running", "kona start cluster "+c.Name)
+		return
+	}
+	probe := m.RegistryProbe
+	if probe == nil {
+		probe = registryUp
+	}
+	if err := probe(reg.IP); err != nil {
+		r.add("registry", CheckFail, fmt.Sprintf("%s:%d: %v", reg.IP, RegistryPort, err), "see `container logs "+reg.Name+"`")
+		return
+	}
+	r.add("registry", CheckPass, fmt.Sprintf("%s serving %s:%d", reg.Name, reg.IP, RegistryPort), "")
 }
 
 func conditionTrue(o kubeObject, typ string) bool {

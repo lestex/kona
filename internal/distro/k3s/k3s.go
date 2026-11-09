@@ -129,3 +129,8 @@ func (K3s) AdminKubeconfig(ctx context.Context, x distro.Execer, c *state.Cluste
 func (K3s) Kubectl(args ...string) []string {
 	return append([]string{"kubectl", "--kubeconfig", AdminKubeconfigPath}, args...)
 }
+
+// RegistryHostsDir implements distro.Distro. k3s generates hosts.toml files
+// here only from /etc/rancher/k3s/registries.yaml, which kona doesn't
+// write, so files kona puts here survive k3s restarts.
+func (K3s) RegistryHostsDir() string { return "/var/lib/rancher/k3s/agent/etc/containerd/certs.d" }

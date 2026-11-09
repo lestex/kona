@@ -39,6 +39,8 @@ type sim struct {
 	failRun    string                       // container name whose run fails
 	notReady   bool
 	cilium     bool // cilium DaemonSet exists
+	// missingImage is an image `container image inspect` doesn't find.
+	missingImage string
 	// boot is each VM's current boot ID; the kubelet's report (reported)
 	// catches up lag polls of `get nodes` after it changes.
 	boot, reported map[string]string
@@ -169,6 +171,8 @@ func (s *sim) runner() *execx.Fake {
 				cs = append(cs, fmt.Sprintf(`{"id":%q,"configuration":{"labels":%s},"status":{"state":%q}}`, n, b, st))
 			}
 			return ok("[" + strings.Join(cs, ",") + "]")
+		case args[0] == "image" && args[1] == "inspect" && args[2] == s.missingImage:
+			return notFound()
 		case args[0] == "run":
 			name := args[slicesIndex(args, "--name")+1]
 			if name == s.failRun {
@@ -259,9 +263,10 @@ func setup(t *testing.T) (*Manager, *sim, *bytes.Buffer, CreateOptions) {
 	m := &Manager{
 		Store: &state.Store{Root: t.TempDir()}, Container: container.New(s.runner()), Log: &log,
 		Host: host, Tools: cache,
-		HostDial:     func(string) error { return nil },
-		HostPrefixes: func() []netip.Prefix { return []netip.Prefix{netip.MustParsePrefix("192.168.1.0/24")} },
-		Now:          func() time.Time { return now },
+		HostDial:      func(string) error { return nil },
+		RegistryProbe: func(string) error { return nil },
+		HostPrefixes:  func() []netip.Prefix { return []netip.Prefix{netip.MustParsePrefix("192.168.1.0/24")} },
+		Now:           func() time.Time { return now },
 		Sleep: func(context.Context, time.Duration) error {
 			now = now.Add(pollInterval)
 			return nil
@@ -601,11 +606,11 @@ func TestVerifyHealthyCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range r.Checks {
-		if c.Status != CheckPass {
+		if c.Status != CheckPass && (c.ID != "registry" || c.Status != CheckSkip) {
 			t.Errorf("%s: %s %s", c.ID, c.Status, c.Detail)
 		}
 	}
-	if len(r.Checks) != 8 || r.Failed() != 0 {
+	if len(r.Checks) != 9 || r.Failed() != 0 {
 		t.Fatalf("report: %+v", r)
 	}
 }
