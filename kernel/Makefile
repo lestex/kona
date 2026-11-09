@@ -7,7 +7,7 @@ TARBALL := out/linux-$(KERNEL_VERSION).tar.xz
 MAJOR   := $(firstword $(subst ., ,$(KERNEL_VERSION)))
 # The vmnet gateway DNS forwarder is not reliable on every host (see
 # docs/failure-modes.md), so pass the host's primary resolver explicitly.
-DNS     ?= $(shell scutil --dns | awk '/nameserver\[0\]/{print $$3; exit}')
+DNS     ?= $(shell scutil --dns | awk '/nameserver\[[0-9]+\]/ && $$3 ~ /^[0-9.]+$$/ {print $$3; exit}')
 
 .PHONY: all image kernel clean
 

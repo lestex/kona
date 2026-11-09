@@ -354,6 +354,9 @@ func TestValidate(t *testing.T) {
 	bad := []func(*CreateOptions){
 		func(o *CreateOptions) { o.ControlPlanes = 2 },
 		func(o *CreateOptions) { o.Workers = -1 },
+		func(o *CreateOptions) { o.DNS = "" },
+		func(o *CreateOptions) { o.DNS = "2600:1700:1964:80b0::1" },
+		func(o *CreateOptions) { o.DNS = "dns.example" },
 		func(o *CreateOptions) { o.CNI = "calico" },
 		func(o *CreateOptions) { o.Memory = "lots" },
 		func(o *CreateOptions) { o.Kernel = "/nope" },

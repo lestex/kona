@@ -6,7 +6,7 @@ REPO  ?= ghcr.io/lestex/kona-node
 TAG   := $(subst +,-,$(K3S_VERSION))
 IMAGE := $(REPO):$(TAG)
 KUBEADM_IMAGE := $(REPO):$(KUBERNETES_VERSION)-kubeadm
-DNS   ?= $(shell scutil --dns | awk '/nameserver\[0\]/{print $$3; exit}')
+DNS   ?= $(shell scutil --dns | awk '/nameserver\[[0-9]+\]/ && $$3 ~ /^[0-9.]+$$/ {print $$3; exit}')
 
 .PHONY: build build-kubeadm print-image
 

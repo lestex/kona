@@ -90,3 +90,52 @@ func TestContainerBuildSigning(t *testing.T) {
 		t.Fatalf("pkg: %+v", r)
 	}
 }
+
+const scutilIPv6First = `DNS configuration
+
+resolver #1
+  search domain[0] : attlocal.net
+  nameserver[0] : 2600:1700:1964:80b0::1
+  nameserver[1] : 192.168.1.254
+  if_index : 14 (en0)
+
+resolver #2
+  domain   : local
+  options  : mdns
+
+resolver #3
+  domain   : example.vpn
+  nameserver[0] : 10.8.0.1
+
+DNS configuration (for scoped queries)
+
+resolver #1
+  nameserver[0] : 172.16.0.53
+`
+
+func TestHostDNSPicksFirstIPv4(t *testing.T) {
+	cases := map[string]string{
+		// IPv6 first (this host on 2026-11-08): the IPv4 one is used, not
+		// the per-domain VPN resolver or the scoped section.
+		scutilIPv6First: "192.168.1.254",
+		"resolver #1\n  nameserver[0] : 8.8.8.8\n": "8.8.8.8",
+		// IPv6 only: nothing usable.
+		"resolver #1\n  nameserver[0] : 2001:db8::53\n": "",
+		// Only a per-domain resolver has IPv4.
+		"resolver #1\n  nameserver[0] : 2001:db8::53\nresolver #2\n  domain : corp\n  nameserver[0] : 10.0.0.1\n": "",
+	}
+	for out, want := range cases {
+		f := &execx.Fake{Responses: map[string]execx.FakeResponse{"scutil --dns": {Out: []byte(out)}}}
+		if got, err := HostDNS(context.Background(), f); err != nil || got != want {
+			t.Errorf("HostDNS = %q, %v; want %q for:\n%s", got, err, want, out)
+		}
+	}
+}
+
+func TestDNSWarnsWithoutIPv4(t *testing.T) {
+	f := healthy()
+	f.Responses["scutil --dns"] = execx.FakeResponse{Out: []byte("resolver #1\n  nameserver[0] : 2001:db8::53\n")}
+	if r := find(newDoctor(f).Run(context.Background(), Options{}), "dns"); r.Status != Warn || !strings.Contains(r.Fix, "IPv4") {
+		t.Fatalf("dns = %+v", r)
+	}
+}

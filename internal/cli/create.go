@@ -63,7 +63,7 @@ func newCreateClusterCmd(g *globals) *cobra.Command {
 	f.StringVar(&o.K8sVersion, "k8s-version", "", "Kubernetes version (default: the pinned one; must match a published node image)")
 	f.StringVar(&o.Image, "image", "", "node image (default: ghcr.io/lestex/kona-node:<version>)")
 	f.StringVar(&o.Kernel, "kernel", "", "guest kernel for the nodes (default: the installed kona kernel)")
-	f.StringVar(&o.DNS, "dns", "", "DNS server for nodes (default: the host's primary resolver)")
+	f.StringVar(&o.DNS, "dns", "", "IPv4 DNS server for nodes and CoreDNS (default: the host's first IPv4 resolver)")
 	f.IntVar(&o.CPUs, "cpus", 2, "vCPUs per node")
 	f.StringVar(&o.Memory, "memory", "2G", "fixed memory per node (VMs do not balloon)")
 	f.DurationVar(&o.Wait, "wait", 5*time.Minute, "how long to wait for all nodes to be Ready")
