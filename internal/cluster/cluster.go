@@ -228,6 +228,11 @@ func (m *Manager) Create(ctx context.Context, o CreateOptions) (err error) {
 	if err != nil {
 		return err
 	}
+	// Ready nodes come before CoreDNS and the CNI pods: wait, as start
+	// does, until verify passes.
+	if err := m.waitHealthy(ctx, c.Name, deadline); err != nil {
+		return err
+	}
 	c.Phase = state.PhaseReady
 	if err := m.Store.Save(c); err != nil {
 		return err
@@ -256,6 +261,9 @@ func validate(o CreateOptions) error {
 	case "", "default", "cilium":
 	default:
 		return fmt.Errorf("unknown --cni %q (want default or cilium)", o.CNI)
+	}
+	if err := validDNS(o.DNS); err != nil {
+		return err
 	}
 	if o.Kernel == "" {
 		return errors.New("no guest kernel configured")
@@ -314,6 +322,22 @@ func (m *Manager) plan(ctx context.Context, o CreateOptions) (*state.Cluster, er
 	}
 	m.logf("• Planned cluster %q: %d control plane(s), %d worker(s) on %s", o.Name, o.ControlPlanes, o.Workers, subnet)
 	return c, m.Store.Save(c)
+}
+
+// validDNS requires an IPv4 resolver: nodes get it, and CoreDNS forwards to
+// it from the IPv4-only pod network, which can't reach an IPv6 address.
+func validDNS(s string) error {
+	if s == "" {
+		return errors.New("no IPv4 DNS server found on this Mac; pass one with --dns")
+	}
+	a, err := netip.ParseAddr(s)
+	if err != nil {
+		return fmt.Errorf("--dns %q is not an IP address", s)
+	}
+	if !a.Is4() {
+		return fmt.Errorf("--dns %s: use an IPv4 server; cluster networking is IPv4-only, so pods (CoreDNS) can't reach an IPv6 resolver", s)
+	}
+	return nil
 }
 
 // usedPrefixes returns subnets in use by the host, `container` networks and

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -239,29 +240,66 @@ func (d *Doctor) dns(ctx context.Context) Result {
 	r := Result{Name: "dns"}
 	ns, err := HostDNS(ctx, d.Runner)
 	if err != nil || ns == "" {
-		r.Status, r.Message = Warn, "no host DNS resolver found; nodes may not resolve names"
-		r.Fix = "pass --dns <server> to kona create cluster"
+		r.Status, r.Message = Warn, "the host has no IPv4 DNS resolver; pods could not reach an IPv6 one"
+		r.Fix = "pass --dns <IPv4 server> to kona create cluster"
 		return r
 	}
 	r.Status, r.Message = OK, "nodes will use "+ns+" (the vmnet gateway forwarder is not relied on)"
 	return r
 }
 
-// HostDNS returns the host's primary DNS resolver.
+// HostDNS returns the host's first IPv4 DNS resolver from its default
+// (not per-domain) resolver configuration. Cluster networking is IPv4-only:
+// CoreDNS runs in a pod and forwards to the node's resolver, so an IPv6
+// resolver would be unreachable from it even when the node itself can
+// reach it.
 func HostDNS(ctx context.Context, r execx.Runner) (string, error) {
 	out, err := r.Run(ctx, "scutil", "--dns")
 	if err != nil {
 		return "", err
 	}
-	for line := range strings.SplitSeq(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "nameserver[0]") {
-			if _, v, ok := strings.Cut(line, ":"); ok {
-				return strings.TrimSpace(v), nil
+	for _, res := range defaultResolvers(string(out)) {
+		for _, ns := range res {
+			if a, err := netip.ParseAddr(ns); err == nil && a.Is4() {
+				return ns, nil
 			}
 		}
 	}
 	return "", nil
+}
+
+// defaultResolvers returns the nameservers of each resolver block in the
+// unscoped section of `scutil --dns`, in order, skipping per-domain
+// resolvers (mDNS, reverse zones, VPN split DNS), which have a domain line.
+func defaultResolvers(out string) [][]string {
+	var all [][]string
+	var cur []string
+	perDomain, in := false, false
+	end := func() {
+		if in && !perDomain && len(cur) > 0 {
+			all = append(all, cur)
+		}
+		cur, perDomain = nil, false
+	}
+	for line := range strings.SplitSeq(out, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "DNS configuration (for scoped queries)"):
+			end()
+			return all
+		case strings.HasPrefix(line, "resolver #"):
+			end()
+			in = true
+		case strings.HasPrefix(line, "domain ") || strings.HasPrefix(line, "domain:"):
+			perDomain = true
+		case strings.HasPrefix(line, "nameserver["):
+			if _, v, ok := strings.Cut(line, ":"); ok {
+				cur = append(cur, strings.TrimSpace(v))
+			}
+		}
+	}
+	end()
+	return all
 }
 
 // compare compares dotted numeric versions; missing parts count as 0.

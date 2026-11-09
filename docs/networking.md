@@ -128,7 +128,7 @@ kept because they explain the GPU design on the `gpu` branch.
    ([failure-modes.md](failure-modes.md)).
 8. **The vmnet gateway DNS forwarder can be broken.** On this host
    `192.168.64.1:53` refuses queries while `8.8.8.8` works. kona always passes
-   the host's primary resolver explicitly (`--dns`, cloud-init
+   the host's first IPv4 resolver explicitly (`--dns`, cloud-init
    `nameservers`), and the builder does the same (`container build --dns`).
 9. **Unix socket paths are limited to 103 bytes.** Helper and krunkit API
    sockets live under `/tmp/kona-<uid>/<cluster>/` (0700), not in
