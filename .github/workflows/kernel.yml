@@ -1,0 +1,67 @@
+# Builds the kona guest kernel and checks it is exactly the build
+# versions.env pins (KONA_KERNEL_SHA256_ARM64); on main, publishes it as the
+# GitHub release `kona kernel install` downloads from.
+#
+# The build is reproducible (kernel/build.sh), so the kernel built here must
+# match the one built on a Mac with `make -C kernel`; a mismatch fails the
+# run instead of publishing a kernel no one pinned. The same builder image
+# and build.sh run under docker on GitHub's native arm64 Linux runners.
+#
+# The release tag is kernel-<version>-<sha256[:12]> (internal/kernel), so a
+# new pin is a new release and an existing one is never replaced. It is not
+# marked latest: kona's v* releases are.
+name: kernel
+
+on:
+  pull_request:
+    paths:
+      - kernel/**
+      - versions.env
+      - .github/workflows/kernel.yml
+  push:
+    branches: [main]
+    paths:
+      - kernel/**
+      - versions.env
+      - .github/workflows/kernel.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kernel-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    permissions:
+      contents: write # creating the kernel release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build
+        run: make -C kernel kernel BUILD="docker build" RUN="docker run --rm"
+
+      - name: Matches the pin
+        run: make -C kernel check
+
+      - name: Publish
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag=$(make -s -C kernel print-tag)
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "$tag is already published"
+            exit 0
+          fi
+          ver=$(make -s -C kernel print-version)
+          gh release create "$tag" --target "$GITHUB_SHA" --latest=false \
+            --title "kona kernel $ver ($tag)" \
+            --notes "The kona guest kernel: Linux $ver from kernel.org, built reproducibly with [kernel/build.sh](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/kernel/build.sh) from the config and builder image in [kernel/](https://github.com/$GITHUB_REPOSITORY/tree/$GITHUB_SHA/kernel). The effective config is attached. Install it with \`kona kernel install\`, which checks it against the sha256 pinned in versions.env. See [docs/kernel.md](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/docs/kernel.md)." \
+            "kernel/out/vmlinux-$ver-kona" \
+            "kernel/out/vmlinux-$ver-kona.sha256" \
+            "kernel/out/config-$ver-kona"
