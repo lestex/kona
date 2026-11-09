@@ -21,7 +21,7 @@ required by the brief. Each lists how it shows up and what kona does about it.
 
 | Failure | Symptom | Handling |
 |---|---|---|
-| `container` gives a new IP on every run, even with a pinned MAC | Node IPs change on recreate | The entrypoint makes kona's static IP the primary `eth0` address. The dynamic one stays as a secondary. |
+| `container` gives a new IP on every run, even with a pinned MAC, from a rotating allocator over the whole subnet (`.2`–`.253`; no range or static-IP option in 1.7.1) | Node IPs change on recreate. Worse, a VM's assigned address can be another node's static IP: on 2026-11-08 `kona-worker-1` got `.10`, the control plane's address, and its k3s agent talked to itself (`127.0.0.1:6444/cacerts: EOF`), so it never became Ready after `start` | The entrypoint makes kona's static IP `eth0`'s only IPv4 address and removes `container`'s (the registry VM does the same). kona publishes no ports, so nothing uses `container`'s address. |
 | cgroup v2 "no internal processes" | kubelet: `cannot enter cgroupv2 "/sys/fs/cgroup/kubepods" … invalid state` | The k3s entrypoint moves all processes into `/init` (snapshotting `cgroup.procs` each round) and delegates controllers. systemd nodes manage the root cgroup themselves. |
 | Private mount propagation (all mounts start `private`; systemd in a container doesn't `make-rshared`) | Cilium: `path "/sys/fs/bpf" is mounted on "/sys" but it is not a shared mount` | The entrypoint runs `mount --make-rshared /`, mounts bpffs on `/sys/fs/bpf`, and makes it shared, for both distros. |
 | Fresh ext4 volume has `lost+found` | kubeadm preflight: `/var/lib/etcd is not empty` | The etcd `dataDir` is `/var/lib/etcd/data`, a subdirectory of the block volume. |

@@ -1,11 +1,11 @@
 // Package netplan allocates cluster subnets, static node IPs and MACs.
 //
-// `container` hands out a different primary address on every run, so kona
-// assigns each node a static secondary address from a fixed layout inside
-// the cluster's /24 (see docs/networking.md):
+// `container` hands out a different address on every run, from anywhere in
+// the subnet, so kona assigns each node a static address from a fixed
+// layout inside the cluster's /24, and the node entrypoint removes
+// `container`'s one (see docs/networking.md):
 //
 //	.1        gateway (host)
-//	.2-.9     `container`'s own allocations (reserved)
 //	.10-.19   control planes
 //	.20-.99   workers
 //	.200      registry
