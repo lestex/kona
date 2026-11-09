@@ -64,6 +64,24 @@ moving the tag.
 A `-rc` or `-beta` tag becomes a GitHub pre-release, and its cask is not
 uploaded (`skip_upload: auto`).
 
+## Node images
+
+`kona create` pulls `ghcr.io/lestex/kona-node:<version>` by default.
+`.github/workflows/node-images.yml` builds both images (k3s and kubeadm)
+on GitHub's arm64 Linux runners with docker buildx. It uses the build args
+from `images/node/Makefile`, the same ones a local `container build` uses.
+
+- On a PR that touches `images/node/` or `versions.env`, it only builds.
+- On main, and on a manual run, it also pushes.
+
+The tags are the Kubernetes versions, so a change to the image files
+republishes the same tag. Nodes that already have the image keep the old
+one until it is removed from `container`.
+
+The `kona-node` package must be **public** on GHCR, because kona pulls it
+without credentials. GHCR makes a new package private, so after the first
+push, change its visibility once in the package settings.
+
 ## Rehearsing locally
 
 ```sh
@@ -84,8 +102,4 @@ versions.
 
 ## Not covered yet
 
-- **Node images.** `kona create` defaults to `ghcr.io/lestex/kona-node:<version>`,
-  and nothing publishes those images yet. Until something does, a
-  brew-installed kona needs the images built locally (`images/node`), or
-  an image passed with `--image`.
 - **Signing and notarization.** Both need an Apple Developer ID.
