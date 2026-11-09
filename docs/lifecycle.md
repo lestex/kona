@@ -22,7 +22,8 @@ new boot, and it needs no clock comparison (a freshly booted VM's clock may
 be off).
 
 A fresh Ready still comes before Cilium and CoreDNS are back. `start` then
-polls `verify` until nothing fails. Measured on the `kona` cluster (k3s,
+polls `verify` until nothing fails, and so does `create cluster` (without
+it, `create` returned about 20 s before CoreDNS was ready). Measured on the `kona` cluster (k3s,
 Cilium, then still with a GPU node): nodes were fresh-Ready about 21 s after
 start, and verify passed about 45 s later. `start` took 69 s in total.
 
