@@ -3,29 +3,19 @@
 package cni
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/lestex/kona/internal/state"
 	"github.com/lestex/kona/internal/version"
 )
 
-// GPUUnderlayMTU is the smallest underlay MTU once GPU nodes exist: the
-// WireGuard link (wg0, 1420). The Cilium chart's MTU value is the underlay
-// MTU; Cilium keeps the VXLAN overhead (50 bytes) off the pod path itself.
-// Measured with DF pings CPU pod -> GPU pod: MTU=1420 passes 1370-byte
-// packets and refuses 1380 (pod eth0 still shows 1420); MTU=1370 only
-// passes 1320. So 1420 is exact, and anything larger fragments on wg0.
-const GPUUnderlayMTU = 1420
-
 // CiliumVersion is the pinned Cilium release without the leading "v".
 func CiliumVersion() string { return strings.TrimPrefix(version.Get("CILIUM_VERSION"), "v") }
 
 // CiliumInstallArgs returns `cilium install` arguments for c.
 //
-// Datapath: kube-proxy replacement with VXLAN tunneling (docs/networking.md:
-// nodes are L2-adjacent per vmnet network, and CPU<->GPU traffic crosses
-// WireGuard, so a tunnel keeps pod routing independent of the underlay).
+// Datapath: kube-proxy replacement with VXLAN tunneling, which keeps pod
+// routing independent of the underlay (docs/networking.md).
 // The API server is addressed directly (k8sServiceHost) because there is
 // no kube-proxy to program the kubernetes Service.
 //
@@ -34,7 +24,7 @@ func CiliumVersion() string { return strings.TrimPrefix(version.Get("CILIUM_VERS
 // /opt/cni/bin (its own data-dir paths apply only in flannel mode).
 func CiliumInstallArgs(c *state.Cluster, kubeconfig, context string) []string {
 	cp := c.ControlPlanes()[0]
-	args := []string{"install",
+	return []string{"install",
 		"--kubeconfig", kubeconfig, "--context", context,
 		"--version", CiliumVersion(),
 		"--set", "kubeProxyReplacement=true",
@@ -47,12 +37,6 @@ func CiliumInstallArgs(c *state.Cluster, kubeconfig, context string) []string {
 		"--set", "hubble.enabled=true",
 		"--set", "hubble.relay.enabled=true",
 	}
-	if len(c.GPUNodes()) > 0 {
-		// CPU<->GPU traffic crosses WireGuard (wg0, MTU 1420). The chart key
-		// is upper-case MTU; a lower-case "mtu" is silently ignored.
-		args = append(args, "--set", "MTU="+strconv.Itoa(GPUUnderlayMTU))
-	}
-	return args
 }
 
 // CiliumStatusArgs waits until Cilium reports healthy.

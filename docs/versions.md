@@ -10,12 +10,10 @@ the binary (`kona version`). Verbatim `--help` output is in
 | Tool | Version | Install | Notes |
 |------|---------|---------|-------|
 | Apple `container` | 1.4.1 (2026-09-09) | `brew install container` (homebrew-core formula) | Also ships as a signed .pkg on GitHub releases. 1.4.0 was never released. |
-| krunkit | 1.3.2 (2026-07-03) | `brew tap libkrun/krun && brew install libkrun/krun/krunkit` | Pulls libkrun 1.19.5, libkrunfw 5.6.2, virglrenderer-krun 0.10.4e, molten-vk 1.4.2, gvproxy 0.8.9. |
-| vmnet-helper | 0.13.0 (2026-08-02) | `brew tap nirs/vmnet-helper && brew install vmnet-helper` | On macOS 26 it needs **no root**. Binary at `$(brew --prefix vmnet-helper)/libexec/vmnet-helper`, not on `PATH`. |
 
-Homebrew now requires trusting third-party taps (`brew trust <tap>` or
-`brew trust --formula <tap>/<formula>`) before it will load their formulae.
-`kona doctor` prints the trust command along with the install command.
+krunkit 1.3.2 and vmnet-helper 0.13.0 were host tools for GPU nodes, which
+were removed on 2026-11-08 (they live on the `gpu` branch). Findings 2–4
+below concern them and are kept as history.
 
 ## Deviations from the original task brief
 
@@ -76,5 +74,3 @@ These are places where observed behavior differs from the brief. Each one is fla
 | Cilium / cilium-cli | v1.20.2 / v0.20.1 | |
 | Sonobuoy | v0.57.5 | Gate runs. |
 | Linux kernel | 6.18.35 | Matches Apple's default kernel exactly, so the kona config diff is minimal. |
-| Mesa | 26.2.3 | Venus ICD in GPU guests. |
-| Fedora | 44 | GPU node base (Cloud Base Generic aarch64). |

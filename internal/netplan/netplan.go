@@ -9,11 +9,6 @@
 //	.10-.19   control planes
 //	.20-.99   workers
 //	.200      registry
-//
-// GPU (krunkit) nodes live on a second /24 served by vmnet-helper:
-//
-//	.1        gateway (host), also the WireGuard endpoint host for GPU nodes
-//	.10-.99   GPU workers
 package netplan
 
 import (
@@ -37,12 +32,7 @@ const (
 	workerBase       = 20
 	workerMax        = 80
 	RegistryOffset   = 200
-	gpuWorkerBase    = 10
-	gpuWorkerMax     = 90
 )
-
-// FirstWGPort is the lowest host UDP port kona publishes for WireGuard.
-const FirstWGPort = 51820
 
 // PickSubnet returns the first candidate /24 that overlaps none of used.
 func PickSubnet(used []netip.Prefix) (netip.Prefix, error) {
@@ -96,40 +86,6 @@ func WorkerIP(subnet netip.Prefix, i int) (netip.Addr, error) {
 		return netip.Addr{}, fmt.Errorf("worker index %d out of range 1-%d", i, workerMax)
 	}
 	return offset(subnet, workerBase+i-1), nil
-}
-
-// GPUWorkerIP returns the address of GPU worker i (1-based) in the GPU subnet.
-func GPUWorkerIP(subnet netip.Prefix, i int) (netip.Addr, error) {
-	if i < 1 || i > gpuWorkerMax {
-		return netip.Addr{}, fmt.Errorf("GPU worker index %d out of range 1-%d", i, gpuWorkerMax)
-	}
-	return offset(subnet, gpuWorkerBase+i-1), nil
-}
-
-// PickPorts returns n host UDP ports from FirstWGPort upwards that are not
-// in used and that free() accepts (free may be nil).
-func PickPorts(n int, used map[int]bool, free func(int) bool) ([]int, error) {
-	var out []int
-	for p := FirstWGPort; p < FirstWGPort+2000 && len(out) < n; p++ {
-		if used[p] || (free != nil && !free(p)) {
-			continue
-		}
-		out = append(out, p)
-	}
-	if len(out) < n {
-		return nil, fmt.Errorf("no free UDP ports for WireGuard in %d-%d", FirstWGPort, FirstWGPort+1999)
-	}
-	return out, nil
-}
-
-// UDPPortFree reports whether a UDP port can be bound on the host.
-func UDPPortFree(p int) bool {
-	c, err := net.ListenPacket("udp4", fmt.Sprintf(":%d", p))
-	if err != nil {
-		return false
-	}
-	c.Close()
-	return true
 }
 
 // RegistryIP returns the registry address.

@@ -869,6 +869,10 @@ GPU (krunkit) nodes don't exist before Phase 3, so this was run there, over the 
 
 ## Phase 3: GPU nodes and DRA
 
+> GPU nodes, the WireGuard link and kona-venus-dra were removed on
+> 2026-11-08; the code is on the `gpu` branch. These results are kept as the
+> record of what that code did.
+
 All on the `kona` cluster: k3s v1.37.0+k3s1, Cilium 1.20.2, 1 control plane,
 1 worker, 1 krunkit GPU node (`--gpu-link relay`), Homebrew `container`
 1.5.0, krunkit 1.3.2, vmnet-helper 0.13.0, kona-venus-dra v0.2.0, Apple M3
@@ -947,7 +951,7 @@ kubelet log lines since the delete: 28
 
 Three pods each claiming 8Gi of the 18Gi device: two run the compute test
 at the same time, the third stays Pending. A claim without an amount stays
-Pending while they run. Output in [gpu.md](gpu.md#sharing-the-gpu-by-memory).
+Pending while they run. Output in `docs/gpu.md` on the `gpu` branch ("Sharing the GPU by memory").
 
 ### 3.4 Vulkan compute and llama.cpp on the GPU: PASS
 

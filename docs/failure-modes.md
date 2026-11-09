@@ -7,14 +7,13 @@ required by the brief. Each lists how it shows up and what kona does about it.
 
 | Failure | Symptom | Handling |
 |---|---|---|
-| macOS < 26 | vmnet networks can't reach each other, and vmnet-helper needs root | `kona doctor` fails with the reason. kona never works around it silently. |
+| macOS < 26 | vmnet networks can't reach each other | `kona doctor` fails with the reason. kona never works around it silently. |
 | Stale or wrong guest kernel | Missing features; for example Cilium can't iterate sockets | The kernel sha256 is pinned in `versions.env`. `kona doctor` and `create` fail and print the reinstall command. Node boot fails fast (exit 78) naming the missing `CONFIG_*`. |
 | vmnet gateway DNS forwarder refuses queries | `Temporary failure resolving …` in nodes and builds | kona passes the host's primary resolver explicitly (`--dns`) and never relies on 192.168.x.1:53. |
 | Stale negative DNS cache on macOS (`github.com` unresolvable, public resolvers fine) | `curl: (6) Could not resolve host` for host-side downloads | Tool downloads fail loudly with the URL. Checksum pinning (`hack/pin-checksums.sh`) aborts on any failed lookup instead of writing empty pins. Fix: `sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder`, or run the script in a container. |
 | User's Helm setup (repos, caches) | `cilium install` failed: `no cached repo found … az-index.yaml` | The Cilium CLI runs with `HELM_*` pointed at `~/Library/Application Support/kona/helm/`. kona never reads or changes the user's Helm config. |
-| `container` upgraded (e.g. 1.4.1 → 1.5.0 by `brew upgrade`) | Its services restart and **stop every VM**. Each new build has its own macOS **Local Network** rule, and Homebrew's ad-hoc-signed 1.5.0 runtime ended up denied (the Settings toggle didn't stick). Measured with that rule in place (2026-10-13): **TCP** published ports accept the connection and then return nothing (earlier: `connect failed … No route to host`, apple/container#2067), while the container IP works directly. **UDP** published ports work in both directions, and `--gpu-link publish` passed the GPU↔CPU pod-to-pod gate | `kona get clusters` shows `degraded` or `stopped`; run `kona start cluster`. kona's default GPU link (`relay`) doesn't use container's forwarder. kona itself never publishes TCP ports. The version kona is tested with is pinned in `versions.env`. |
-| Host sleep | `container` VMs survived an overnight idle-sleep cycle, but the krunkit GPU VM and its vmnet-helper did not; both were gone with no log line and no crash report. The cause is not yet known | `kona start cluster` boots it again from its disk. Its configuration (static IP, WireGuard, k3s) is on the disk, so it rejoins. |
-| deprecated `slp/krunkit` tap | krunkit stuck on 1.1.1 | `kona doctor` detects it and prints the migration commands to `libkrun/krun`. |
+| `container` upgraded (e.g. 1.4.1 → 1.5.0 → 1.7.1 by `brew upgrade`) | Its services restart and **stop every VM**. Each new build also gets its own macOS **Local Network** rule. On Homebrew's ad-hoc-signed 1.5.0 that rule ended up denied and TCP published ports failed (`connect failed … No route to host`, apple/container#2067). On 1.7.1 (macOS 27.2, 2026-11-08) TCP and UDP published ports work with the rule allowed **and** with it denied | `kona get clusters` shows `degraded` or `stopped`; run `kona start cluster`. kona reaches nodes at their IPs and publishes no ports, so the Local Network rule doesn't affect it. The version kona is tested with is pinned in `versions.env`. |
+| Host sleep | `container` VMs survived an overnight idle-sleep cycle | Nothing needed; guest clocks are stepped by chrony (see below). |
 
 ## Node VMs (Apple `container`)
 
@@ -27,7 +26,7 @@ required by the brief. Each lists how it shows up and what kona does about it.
 | Default container MTU 1280 | Fragmentation or drops for overlay traffic | Nodes run with `mtu=1500`. |
 | vmnet passes TSO super-frames to a VM unsegmented ([details](#vmnet-tso-super-frames)) | Uploads of more than ~256 KiB from another `container` VM to a NodePort stall until timeout. Downloads, and uploads from the macOS host or from pods, work | Not handled. It is a vmnet/`container` bug, and kona adds no proxy around it. Reproduce with `hack/repro-vmnet-tso.sh`. |
 | Guest clock drift after host sleep | Skewed timestamps and TLS/token errors | chrony runs with `makestep 1 -1`. `kona get nodes` shows skew per node: after a real overnight sleep/wake cycle, skew was +0.06 s to +0.20 s. |
-| Host reboot, or `container` services restart | All `container` VMs stop, and krunkit VMs are gone | `kona start cluster` restarts control planes first, then workers and GPU nodes, and waits until `kona verify cluster` passes ([lifecycle.md](lifecycle.md)). Static IPs and WireGuard configs are reapplied from the node disks. |
+| Host reboot, or `container` services restart | All `container` VMs stop | `kona start cluster` restarts control planes first, then workers, and waits until `kona verify cluster` passes ([lifecycle.md](lifecycle.md)). The entrypoint reapplies each node's static IP. |
 
 ## Lifecycle
 
@@ -35,10 +34,8 @@ required by the brief. Each lists how it shows up and what kona does about it.
 |---|---|
 | Partial `create` failure | Rolls back by default: VMs, volumes, network, kubeconfig and state are removed (verified: no orphans). `--retain` keeps everything flagged `failed`, and re-running `create` resumes it. |
 | Orphans (resources labeled `kona.cluster` with no state) | `kona get clusters` flags them. `kona delete cluster <name>` and `--all` delete from labels, so this works without state. |
-| vmnet-helper hangs in `vmnet_start_interface` (colliding subnet or reused interface ID); SIGTERM is ignored | 10 s start timeout, then SIGKILL. A fresh interface ID is used on every start (Phase 3). |
-| `container` can't join krunkit VMs to its network, and separate vmnet networks are isolated | GPU nodes are reached over WireGuard via a published UDP port ([networking.md](networking.md)). |
-| Wi-Fi change | L2 paths are unaffected. The GPU↔CPU tunnel can stall for up to ~40 s until keepalive traffic restores it. |
-| Venus unavailable (Phase 3) | The GPU node joins untainted without the DRA plugin, with a loud warning. |
+| Wi-Fi change | Node↔node and host↔node paths are unaffected ([networking.md](networking.md)). |
+| Cluster created by an older kona with GPU nodes | `start`, `stop`, `add node` and `verify` refuse it and point at the `gpu` branch. `kona delete cluster` removes its `container` parts and warns about the krunkit VM. |
 
 ## vmnet TSO super-frames
 
@@ -94,8 +91,7 @@ off    client -> router (local)         8388608/8388608 0
 off    client -> router -> netns (fwd)  8388608/8388608 0
 ```
 
-The forwarding veth has MTU 1500, so kona's Cilium MTU (1420) is not the
-cause. `FragFails` is the counter `ip_forward` bumps for these drops.
+The forwarding veth has MTU 1500, so the overlay MTU is not the cause. `FragFails` is the counter `ip_forward` bumps for these drops.
 
 **Options considered.** None are applied:
 

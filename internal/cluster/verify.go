@@ -6,13 +6,10 @@ import (
 	"fmt"
 	"math"
 	"net"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/lestex/kona/internal/distro"
-	"github.com/lestex/kona/internal/procx"
 	"github.com/lestex/kona/internal/state"
 )
 
@@ -56,18 +53,14 @@ func (r *Report) add(id, status, detail, hint string) {
 	r.Checks = append(r.Checks, Check{ID: id, Status: status, Detail: detail, Hint: hint})
 }
 
-// kubeObject holds the fields verify reads from nodes, pods, DaemonSets,
-// Deployments and ResourceSlices.
+// kubeObject holds the fields verify reads from nodes, pods, DaemonSets and
+// Deployments.
 type kubeObject struct {
 	Kind     string `json:"kind"`
 	Metadata struct {
-		Name      string            `json:"name"`
-		Namespace string            `json:"namespace"`
-		Labels    map[string]string `json:"labels"`
+		Name      string `json:"name"`
+		Namespace string `json:"namespace"`
 	} `json:"metadata"`
-	Spec struct {
-		NodeName string `json:"nodeName"`
-	} `json:"spec"`
 	Status struct {
 		Conditions []struct {
 			Type   string `json:"type"`
@@ -105,13 +98,16 @@ func (m *Manager) Verify(ctx context.Context, name string) (Report, error) {
 	if err != nil {
 		return r, err
 	}
+	if err := supported(c); err != nil {
+		return r, err
+	}
 	d, err := DistroFor(c.Distro)
 	if err != nil {
 		return r, err
 	}
 	startHint := "kona start cluster " + name
 
-	// VMs and relays.
+	// VMs.
 	cs, err := m.containersOf(ctx, name)
 	if err != nil {
 		return r, err
@@ -119,12 +115,8 @@ func (m *Manager) Verify(ctx context.Context, name string) (Report, error) {
 	var down []string
 	running := map[string]bool{}
 	for _, n := range c.Nodes {
-		up := false
-		if n.Kind == state.KindKrunkit {
-			up = m.gpuRunning(c, n)
-		} else if ct, ok := cs[n.Name]; ok {
-			up = ct.Status.State == "running"
-		}
+		ct, ok := cs[n.Name]
+		up := ok && ct.Status.State == "running"
 		running[n.Name] = up
 		if !up {
 			down = append(down, n.Name)
@@ -135,25 +127,6 @@ func (m *Manager) Verify(ctx context.Context, name string) (Report, error) {
 	} else {
 		r.add("vms", CheckPass, fmt.Sprintf("%d node VMs running", len(c.Nodes)), "")
 	}
-	switch {
-	case len(c.GPUNodes()) == 0:
-		r.add("relays", CheckSkip, "no GPU nodes", "")
-	case c.GPULink() != state.GPULinkRelay:
-		r.add("relays", CheckSkip, "--gpu-link "+c.GPULink(), "")
-	default:
-		var dead []string
-		for _, n := range c.CPUNodes() {
-			if n.WGPort != 0 && !m.relayRunning(c, n) {
-				dead = append(dead, n.Name)
-			}
-		}
-		if len(dead) > 0 {
-			r.add("relays", CheckFail, "no WireGuard relay for: "+strings.Join(dead, ", "), startHint)
-		} else {
-			r.add("relays", CheckPass, fmt.Sprintf("%d WireGuard relays running", len(c.CPUNodes())), "")
-		}
-	}
-
 	// API, from the host (what kubectl uses) and inside the control plane.
 	cp := c.ControlPlanes()[0]
 	if err := m.hostDial(net.JoinHostPort(cp.IP, "6443")); err != nil {
@@ -163,7 +136,7 @@ func (m *Manager) Verify(ctx context.Context, name string) (Report, error) {
 	}
 	if _, err := m.Container.Exec(ctx, cp.Name, d.Kubectl("get", "--raw", "/readyz")...); err != nil {
 		r.add("api", CheckFail, "readyz: "+lastLine(err), "see `container logs "+cp.Name+"`")
-		for _, id := range []string{"nodes", "pods", "daemonsets", "dns", "gpu"} {
+		for _, id := range []string{"nodes", "pods", "daemonsets", "dns"} {
 			r.add(id, CheckSkip, "API not ready", "")
 		}
 		r.add("clock", CheckSkip, "API not ready", "")
@@ -189,7 +162,6 @@ func (m *Manager) Verify(ctx context.Context, name string) (Report, error) {
 	m.verifyNodes(ctx, &r, c, byKind["Node"], running)
 	m.verifyWorkloads(&r, byKind)
 	m.verifyClock(ctx, &r, c, running)
-	m.verifyGPU(ctx, &r, d, c, byKind["Node"])
 	return r, nil
 }
 
@@ -317,55 +289,6 @@ func (m *Manager) verifyClock(ctx context.Context, r *Report, c *state.Cluster, 
 	}
 }
 
-func (m *Manager) verifyGPU(ctx context.Context, r *Report, d distro.Distro, c *state.Cluster, nodes []kubeObject) {
-	gpus := c.GPUNodes()
-	if len(gpus) == 0 {
-		r.add("gpu", CheckSkip, "no GPU nodes", "")
-		return
-	}
-	labels := map[string]string{}
-	for _, o := range nodes {
-		labels[o.Metadata.Name] = o.Metadata.Labels[LabelGPU]
-	}
-	out, err := m.Container.Exec(ctx, c.ControlPlanes()[0].Name, d.Kubectl("get", "resourceslices", "-o", "json")...)
-	if err != nil {
-		r.add("gpu", CheckFail, "list ResourceSlices: "+lastLine(err), "")
-		return
-	}
-	var slices struct {
-		Items []kubeObject `json:"items"`
-	}
-	if err := json.Unmarshal(out, &slices); err != nil {
-		r.add("gpu", CheckFail, "parse ResourceSlices: "+err.Error(), "")
-		return
-	}
-	published := map[string]bool{}
-	for _, s := range slices.Items {
-		published[s.Spec.NodeName] = true
-	}
-	var fail, warn []string
-	for _, n := range gpus {
-		switch labels[n.Name] {
-		case GPUAvailable:
-			if !published[n.Name] {
-				fail = append(fail, n.Name+" has no ResourceSlice")
-			}
-		case GPUUnavailable:
-			warn = append(warn, n.Name+" has no Venus GPU (joined as a CPU node)")
-		default:
-			fail = append(fail, n.Name+" has no "+LabelGPU+" label")
-		}
-	}
-	switch {
-	case len(fail) > 0:
-		r.add("gpu", CheckFail, strings.Join(append(fail, warn...), "; "), "see `kubectl -n kona-system logs ds/kona-venus-dra`")
-	case len(warn) > 0:
-		r.add("gpu", CheckWarn, strings.Join(warn, "; "), "see docs/gpu.md")
-	default:
-		r.add("gpu", CheckPass, fmt.Sprintf("%d GPU node(s) publish a Venus ResourceSlice", len(gpus)), "")
-	}
-}
-
 func conditionTrue(o kubeObject, typ string) bool {
 	for _, c := range o.Status.Conditions {
 		if c.Type == typ {
@@ -373,14 +296,6 @@ func conditionTrue(o kubeObject, typ string) bool {
 		}
 	}
 	return false
-}
-
-func (m *Manager) relayRunning(c *state.Cluster, n state.Node) bool {
-	if m.RelayRunning != nil {
-		return m.RelayRunning(c, n)
-	}
-	pid, ok := procx.ReadPid(filepath.Join(m.nodeDir(c.Name, n.Name), "relay.pid"))
-	return ok && procx.Alive(pid, relayTag(c.Name))
 }
 
 func (m *Manager) hostDial(addr string) error {

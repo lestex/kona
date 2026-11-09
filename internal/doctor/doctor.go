@@ -38,13 +38,8 @@ type Result struct {
 
 // Options select optional checks.
 type Options struct {
-	// GPU enables the krunkit/vmnet-helper checks as failures instead of
-	// warnings.
-	GPU bool
 	// Kernel is the kona kernel path to verify ("" = skip).
 	Kernel string
-	// GPUImage is the GPU node disk image to verify ("" = skip).
-	GPUImage string
 }
 
 // Doctor runs checks with injectable host access.
@@ -70,10 +65,6 @@ func (d *Doctor) Run(ctx context.Context, o Options) []Result {
 		rs = append(rs, d.kernel(o.Kernel))
 	}
 	rs = append(rs, d.dns(ctx))
-	rs = append(rs, d.krunkit(ctx, o.GPU), d.vmnetHelper(ctx, o.GPU))
-	if o.GPUImage != "" {
-		rs = append(rs, d.gpuImage(o.GPUImage))
-	}
 	return rs
 }
 
@@ -102,7 +93,7 @@ func (d *Doctor) macOS(ctx context.Context) Result {
 	if compare(v, "26") < 0 {
 		r.Status = Fail
 		r.Message = "macOS " + v + " is not supported: kona needs macOS 26 (Tahoe). On macOS 15, " +
-			"`container` networks are not reachable between VMs and vmnet-helper needs root"
+			"`container` networks are not reachable between VMs"
 		r.Fix = "upgrade to macOS 26"
 		return r
 	}
@@ -160,7 +151,8 @@ var runtimePlugins = []string{
 
 // containerBuild reports how the container runtime plugin is signed. macOS
 // keys Local Network rules by binary, and Homebrew's ad-hoc-signed builds
-// get a fresh rule per version; kona's relay and node IPs don't need it.
+// get a fresh rule per version. kona reaches nodes at their IPs and
+// publishes no ports, so it doesn't need that rule.
 func (d *Doctor) containerBuild(ctx context.Context, status string) (Result, bool) {
 	var root string
 	for _, line := range strings.Split(status, "\n") {
@@ -191,7 +183,7 @@ func (d *Doctor) containerBuild(ctx context.Context, status string) (Result, boo
 			r.Message = "runtime signed by team " + team
 		case adhoc:
 			r.Message = "ad-hoc signed (Homebrew build): its macOS Local Network rule is per version; " +
-				"if denied, TCP port publishing fails, but kona's relay and node IPs are unaffected (docs/failure-modes.md)"
+				"kona publishes no ports, so it doesn't depend on it (docs/failure-modes.md)"
 		default:
 			r.Message = "runtime signature unknown: " + path
 		}
@@ -224,18 +216,6 @@ func (d *Doctor) kernel(path string) Result {
 			r.Fix = fix
 			return r
 		}
-	}
-	r.Status, r.Message = OK, path
-	return r
-}
-
-func (d *Doctor) gpuImage(path string) Result {
-	r := Result{Name: "gpu-image"}
-	if _, err := d.Stat(path); err != nil {
-		r.Status, r.Message = Fail, "GPU node disk image not found at "+path
-		r.Fix = "make -C images/gpu-node && mkdir -p \"$(dirname '" + path + "')\" && cp -c images/gpu-node/out/" +
-			filepath.Base(path) + " '" + path + "'  (or pass --gpu-image)"
-		return r
 	}
 	r.Status, r.Message = OK, path
 	return r
@@ -282,62 +262,6 @@ func HostDNS(ctx context.Context, r execx.Runner) (string, error) {
 		}
 	}
 	return "", nil
-}
-
-func (d *Doctor) krunkit(ctx context.Context, gpu bool) Result {
-	r := Result{Name: "krunkit"}
-	missing := Warn
-	if gpu {
-		missing = Fail
-	}
-	fix := "brew tap libkrun/krun && brew trust --formula libkrun/krun/krunkit libkrun/krun/libkrun " +
-		"libkrun/krun/libkrunfw libkrun/krun/virglrenderer-krun libkrun/krun/gvproxy && brew install libkrun/krun/krunkit"
-	if out, err := d.Runner.Run(ctx, "brew", "list", "--full-name"); err == nil &&
-		strings.Contains(string(out), "slp/krunkit/") {
-		r.Status = missing
-		r.Message = "krunkit is installed from the deprecated slp/krunkit tap"
-		r.Fix = "brew list --full-name | grep '^slp/krunkit/' | xargs brew uninstall && brew untap slp/krunkit && " + fix
-		return r
-	}
-	out, err := d.Runner.Run(ctx, "krunkit", "--version")
-	if err != nil {
-		r.Status, r.Message, r.Fix = missing, "krunkit not installed (needed for --gpu-workers)", fix
-		return r
-	}
-	got := versionRE.FindString(string(out))
-	if want := version.Get("KRUNKIT_VERSION"); want != "" && compare(got, want) < 0 {
-		r.Status, r.Message, r.Fix = missing, fmt.Sprintf("krunkit %s is older than %s", got, want), "brew upgrade libkrun/krun/krunkit"
-		return r
-	}
-	r.Status, r.Message = OK, "krunkit "+got
-	return r
-}
-
-func (d *Doctor) vmnetHelper(ctx context.Context, gpu bool) Result {
-	r := Result{Name: "vmnet-helper"}
-	missing := Warn
-	if gpu {
-		missing = Fail
-	}
-	fix := "brew tap nirs/vmnet-helper && brew trust nirs/vmnet-helper && brew install vmnet-helper"
-	prefix, err := d.Runner.Run(ctx, "brew", "--prefix", "vmnet-helper")
-	if err != nil {
-		r.Status, r.Message, r.Fix = missing, "vmnet-helper not installed (needed for --gpu-workers)", fix
-		return r
-	}
-	bin := strings.TrimSpace(string(prefix)) + "/libexec/vmnet-helper"
-	out, err := d.Runner.Run(ctx, bin, "--version")
-	if err != nil {
-		r.Status, r.Message, r.Fix = missing, "vmnet-helper not installed (needed for --gpu-workers)", fix
-		return r
-	}
-	got := versionRE.FindString(string(out))
-	if want := version.Get("VMNET_HELPER_VERSION"); want != "" && compare(got, want) < 0 {
-		r.Status, r.Message, r.Fix = missing, fmt.Sprintf("vmnet-helper %s is older than %s", got, want), "brew upgrade vmnet-helper"
-		return r
-	}
-	r.Status, r.Message = OK, "vmnet-helper "+got
-	return r
 }
 
 // compare compares dotted numeric versions; missing parts count as 0.

@@ -11,7 +11,7 @@ func newStartCmd(g *globals) *cobra.Command {
 	var wait time.Duration
 	cluster := &cobra.Command{
 		Use:   "cluster [NAME]",
-		Short: "Start a cluster's stopped nodes (after a host reboot, or GPU nodes lost to host sleep)",
+		Short: "Start a cluster's stopped nodes (after a host reboot)",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := DefaultClusterName

@@ -1,12 +1,98 @@
 # Networking design
 
-Status: **Phase 0 result. Option (c), a WireGuard overlay, is chosen
-provisionally.** Option (b) still needs one root-only check (pf rules). The
-sleep/wake and Wi-Fi-change tests are still pending. See "Open items".
+Status: **every node is an Apple `container` VM on one `container` network
+per cluster.** Nodes, the host and the API server reach each other directly
+on that network: no tunnel, no NAT and no published ports. GPU nodes
+(krunkit VMs on a second vmnet network, linked over WireGuard) were removed
+on 2026-11-08 and live on the `gpu` branch.
 
-## Constraints observed on macOS 26.6.2 / container 1.4.1 / vmnet-helper 0.13.0
+## Design
+
+```mermaid
+flowchart LR
+  subgraph host[macOS host]
+    subgraph cnet["container network kona-&lt;cluster&gt; (192.168.70.0/24, mtu 1500)"]
+      cp["control-plane-1<br/>eth0 192.168.70.10 (static)"]
+      w1["worker-1<br/>eth0 192.168.70.20"]
+      w2["worker-2<br/>eth0 192.168.70.21"]
+    end
+    kubectl(["kubectl → https://192.168.70.10:6443"])
+  end
+  cp <-- "direct L2" --> w1 & w2
+  kubectl --> cp
+```
+
+- **Node IP** = the node's static address from the cluster /24
+  (`internal/netplan`): control planes at `.10+`, workers at `.20+`, the
+  registry at `.200`. The node entrypoint makes it the primary `eth0`
+  address (finding 5). kona stores it in state, and it's identical across
+  recreates. k3s: `--node-ip <ip> --advertise-address <ip> --flannel-iface eth0`.
+  kubeadm: `--apiserver-advertise-address <ip>`.
+- **Node↔node**: direct L2 on the cluster's vmnet bridge, with no
+  encapsulation other than the CNI's.
+- **MTU**: the underlay is 1500 (finding 6). flannel and Cilium pick their
+  VXLAN MTU (1450) from it.
+- **API server from the host**: `https://<control-plane static IP>:6443`,
+  reachable directly because the host sits on the container bridge (verified
+  in Phase 1, see [gates.md](gates.md)). There's no port publish. The cert SANs
+  include every control-plane IP and name.
+- **No NAT** between nodes, and **no sudo** anywhere.
+
+## Wi-Fi change behavior (verified)
+
+`spikes/03-net/wifi-toggle.sh` ran twice. It turns Wi-Fi off for ~8 s, then
+back on. Outputs are in `wifi-toggle-run1.txt` and `wifi-toggle-run2.txt`.
+
+| Path | Wi-Fi off | Wi-Fi back |
+|------|-----------|------------|
+| vmnet bridges | kept | kept |
+| host → node static IPs | ok | ok |
+| node ↔ node (direct L2) | ok | ok |
+| node → internet (vmnet NAT) | fails, as expected | ok |
+
+vmnet networks are host-local and don't depend on the uplink, so Wi-Fi
+changes never touch intra-cluster paths.
+
+## CNI
+
+| `--cni` | k3s | kubeadm |
+|---|---|---|
+| `default` | k3s's built-in flannel (VXLAN, `--flannel-iface eth0`), plus kube-proxy | flannel v0.28.9 (embedded manifest, VXLAN), plus kube-proxy |
+| `cilium` | `--flannel-backend none --disable-network-policy --disable-kube-proxy` | `kubeadm init --skip-phases=addon/kube-proxy`, no flannel |
+
+Cilium (v1.20.2) is installed from the host by the pinned Cilium CLI
+(v0.20.1). kona downloads the CLI, verifies its sha256, and caches it under
+`~/Library/Application Support/kona/bin/`. Settings:
+
+- `kubeProxyReplacement=true`, with `k8sServiceHost` set to the first
+  control plane's static IP, since there's no kube-proxy to program the
+  `kubernetes` Service.
+- `routingMode=tunnel`, `tunnelProtocol=vxlan`. The tunnel keeps pod
+  routing independent of the underlay.
+- `ipam.mode=kubernetes`: pod CIDRs come from the node objects (k3s
+  10.42.0.0/16, kubeadm 10.244.0.0/16).
+- Hubble with relay.
+- CNI paths are Cilium's defaults for both distros. With
+  `--flannel-backend none`, k3s leaves containerd on `/etc/cni/net.d` and
+  `/opt/cni/bin`.
+
+Install order: control plane → API ready → Cilium → remaining nodes → all
+Ready → `cilium status --wait`. Nodes can't become Ready before the CNI runs.
+
+Node requirements Cilium surfaced (details in [failure-modes.md](failure-modes.md)):
+shared mount propagation for `/` and `/sys/fs/bpf` inside node VMs, and
+`CONFIG_INET_DIAG` + `CONFIG_INET_UDP_DIAG` + `CONFIG_INET_DIAG_DESTROY` in
+the guest kernel.
+
+Cilium 1.20 is e2e-tested on Kubernetes 1.33–1.36. kona's default 1.37 is
+outside that list, but the full `cilium connectivity test` passes on it for
+both distros ([gates.md](gates.md)).
+
+## Phase 0 findings (macOS 26.6.2 / container 1.4.1 / vmnet-helper 0.13.0)
 
 All of these come from real runs, in `spikes/03-net/*.txt` and [gates.md](gates.md).
+Items 1–4, 7 and 9 concern krunkit GPU nodes, which kona no longer has; they are
+kept because they explain the GPU design on the `gpu` branch.
 
 1. **krunkit cannot join a `container` network.** `container` creates its
    networks with macOS 26's `vmnet_network` API inside its own XPC plugin
@@ -37,6 +123,9 @@ All of these come from real runs, in `spikes/03-net/*.txt` and [gates.md](gates.
    served by a userspace proxy in `container-runtime-linux`. A krunkit VM
    reaches it at its own gateway (`192.168.65.1:51821`), and the container sees
    the source as its own gateway (`192.168.66.1:<port>`), so it is NATed.
+   On container 1.7.1 (macOS 27.2, 2026-11-08) TCP published ports work too,
+   whether or not the runtime's macOS Local Network rule is allowed
+   ([failure-modes.md](failure-modes.md)).
 8. **The vmnet gateway DNS forwarder can be broken.** On this host
    `192.168.64.1:53` refuses queries while `8.8.8.8` works. kona always passes
    the host's primary resolver explicitly (`--dns`, cloud-init
@@ -45,7 +134,7 @@ All of these come from real runs, in `spikes/03-net/*.txt` and [gates.md](gates.
    sockets live under `/tmp/kona-<uid>/<cluster>/` (0700), not in
    `~/Library/Application Support/...`.
 
-## Options evaluated
+## Options evaluated for linking GPU nodes (Phase 0)
 
 | Option | Result | Notes |
 |--------|--------|-------|
@@ -53,150 +142,3 @@ All of these come from real runs, in `spikes/03-net/*.txt` and [gates.md](gates.
 | (b) Route through the host (`pf` / `ip.forwarding`) | **Blocked by default**, and the fix is unverified | Forwarding is already on and routes exist, but the bridges are isolated (constraint 2). A kona pf anchor with `pass` rules between the kona bridges *might* lift it. That needs `sudo pfctl` to inspect Apple's `com.apple/*` anchors and to load an anchor. |
 | (c) WireGuard overlay between nodes | **Works without root** | 0% loss both ways. The overlay preserves source IPs (tcpdump on `wg0` shows 10.99.0.x on both ends). With a 1500 underlay, the full 1420 MTU passes with DF. ~365 Mbit/s each way through the published-port proxy (the bottleneck is the proxy, not WireGuard). |
 | rejected: L2 relay through a "gateway" container (`--publish-socket` + krunkit `unixstream`) | Not pursued | vmnet filters per-VM MACs. It would need bridging/promiscuous mode inside a guest, is fragile, and still runs through a userspace hop. |
-
-## Chosen design: static underlay node IPs, plus WireGuard between the two networks
-
-> Revised in Phase 1. The Phase 0 draft made `wg0` addresses the node IPs,
-> which would have sent CPU↔CPU traffic through WireGuard too. Now the node IP
-> is the static underlay address, and WireGuard only routes between the
-> `container` network and the GPU network.
-
-```mermaid
-flowchart LR
-  subgraph host[macOS host]
-    subgraph cnet["container network kona-&lt;cluster&gt; (192.168.70.0/24, mtu 1500)"]
-      cp["control-plane-1<br/>eth0 192.168.70.10 (static secondary)"]
-      w1["worker-1<br/>eth0 192.168.70.20"]
-    end
-    subgraph gnet["vmnet-helper shared net (GPU subnet, e.g. 192.168.170.0/24)"]
-      g1["gpu-worker-1<br/>eth0 .10 (static, cloud-init)"]
-    end
-    relay(["kona wg-relay per CPU node<br/>0.0.0.0:51820+N/udp on host<br/>(--gpu-link publish: container's -p forwarder)"])
-  end
-  cp <-- "direct L2, no tunnel" --> w1
-  g1 -- "wg0 → 192.168.x.1:51820+N" --> relay --> cp & w1
-```
-
-- **Node IP** = the node's static underlay address from the cluster /24
-  (`internal/netplan`): control planes at `.10+`, workers at `.20+`, the
-  registry at `.200`. The node entrypoint adds it as a secondary on `eth0`
-  (constraint 5). kona stores it in state, and it's identical across
-  recreates. k3s: `--node-ip <ip> --advertise-address <ip> --flannel-iface eth0`.
-  kubeadm: `--apiserver-advertise-address <ip>`.
-- **CPU↔CPU and GPU↔GPU**: direct L2 on their own vmnet bridge, with no
-  encapsulation other than the CNI's.
-- **CPU↔GPU (Phase 3)**: every GPU node runs `wg0` with one peer per CPU node.
-  The peer's `AllowedIPs` is that node's underlay /32 plus its pod CIDR. GPU
-  nodes dial `<their gateway>:<51820+N>/udp`, where N is allocated per cluster
-  and stored in state. The host listens on both networks, so something on
-  the host has to carry each datagram to the CPU node's `192.168.70.x:51820`.
-  That's the **GPU link**, chosen with `kona create cluster --gpu-link`:
-  - `relay` (default): `kona wg-relay`, one detached UDP relay process per CPU
-    node, started by `create`/`start cluster` and stopped by
-    `stop`/`delete`. Each GPU client gets its own upstream socket, so replies
-    map back to the right GPU node. It only uses kona's own sockets, so it
-    doesn't depend on the `container` build.
-  - `publish`: `container run -p <51820+N>:51820/udp` on each CPU node, using
-    container's own port forwarder. It works on Homebrew's ad-hoc-signed 1.5.0
-    build: on 2026-10-13 a `--gpu-link publish` cluster passed the GPU↔CPU
-    pod-to-pod gate, even though that build's macOS Local Network rule is
-    denied and its TCP forwarding is broken ([failure-modes.md](failure-modes.md)).
-    It was kona's only mode until 1.5.0, and the relay became the default
-    because it doesn't depend on that forwarder.
-
-  CPU nodes get a route to the GPU subnet via `wg0` and learn GPU endpoints
-  from the handshake (`PersistentKeepalive=25`). `kona verify cluster`
-  checks that every relay is running.
-- **MTU budget**: underlay 1500. On CPU↔GPU paths `wg0` is 1420, so the CNI
-  MTU is set cluster-wide to 1370 once GPU nodes exist, which covers
-  flannel/Cilium VXLAN on top of `wg0`. CPU-only clusters keep 1450.
-- **API server from the host**: `https://<control-plane static IP>:6443`,
-  reachable directly because the host sits on the container bridge (verified
-  in Phase 1, see [gates.md](gates.md)). There's no port publish. The cert SANs
-  include every control-plane IP and name.
-- **No NAT between nodes** at the Kubernetes layer. Inside the tunnel, packets
-  carry real node and pod IPs. The only NAT is the GPU link (relay or
-  published-port forwarder) *underneath* WireGuard on CPU↔GPU paths.
-- **No sudo** anywhere in this design.
-
-### Trade-offs
-
-- GPU↔CPU throughput goes through a userspace UDP hop: ~745 Mbit/s with the
-  relay, ~365 Mbit/s with container's published-port forwarder. That's plenty
-  for the control plane, image pulls through the registry, and inference
-  requests, but not for bulk data between CPU and GPU pods. GPU↔GPU and
-  CPU↔CPU run at native vmnet speed.
-- WireGuard adds 60 bytes of overhead and some CPU for crypto. The kona kernel
-  has `CONFIG_WIREGUARD=y` built in, and Fedora has it as a module.
-- If option (b) turns out to work with a single named `sudo pfctl` operation,
-  it can become an opt-in `--network-mode routed` for native GPU↔CPU
-  bandwidth. The WireGuard mesh stays the no-root default.
-
-## Open items (need user action before Phase 1)
-
-1. **pf inspection for option (b).** This is root-only and read-only:
-   `sudo pfctl -sA` and `sudo pfctl -a com.apple -sA`, then `-sr` on each
-   anchor, which shows whether the isolation is a pf rule that a `pass quick`
-   anchor can override.
-2. **Sleep/wake is not tested yet** (deferred by the user). Plan: run
-   `pmset sleepnow` with the mesh up, then wake, and check handshake age, ping,
-   and `chronyc tracking` skew. The expectation, which is **not verified**, is
-   that guest clocks fall behind by the sleep duration until chrony steps them.
-
-## Wi-Fi change behavior (verified)
-
-`spikes/03-net/wifi-toggle.sh` ran twice with the mesh up. It turns Wi-Fi off
-for ~8 s, then back on. Outputs are in `wifi-toggle-run1.txt` and
-`wifi-toggle-run2.txt`.
-
-| Path | Wi-Fi off | Wi-Fi back |
-|------|-----------|------------|
-| vmnet bridges (`bridge100-102`) | kept | kept |
-| host → node static IPs | ok | ok |
-| CPU↔CPU / GPU↔GPU (direct L2) | ok | ok |
-| GPU↔CPU over WireGuard (published-port proxy) | ok | **run 1: broken, healed within ~40 s without a re-handshake; run 2: no outage (≤3 s)** |
-| node → internet (vmnet NAT) | fails, as expected | ok |
-
-vmnet networks are host-local and don't depend on the uplink, so Wi-Fi changes
-never touch intra-cluster L2 paths. The GPU↔CPU path goes through
-`container`'s userspace UDP proxy and can stall briefly when the host's
-primary interface changes. `PersistentKeepalive=25` re-establishes the flow.
-kona's node agent treats a handshake older than 3 × keepalive as degraded and
-bounces the peer endpoint (`wg set ... endpoint`) to force a new flow.
-`kona get nodes` surfaces it.
-
-## CNI
-
-| `--cni` | k3s | kubeadm |
-|---|---|---|
-| `default` | k3s's built-in flannel (VXLAN, `--flannel-iface eth0`), plus kube-proxy | flannel v0.28.9 (embedded manifest, VXLAN), plus kube-proxy |
-| `cilium` | `--flannel-backend none --disable-network-policy --disable-kube-proxy` | `kubeadm init --skip-phases=addon/kube-proxy`, no flannel |
-
-Cilium (v1.20.2) is installed from the host by the pinned Cilium CLI
-(v0.20.1). kona downloads the CLI, verifies its sha256, and caches it under
-`~/Library/Application Support/kona/bin/`. Settings:
-
-- `kubeProxyReplacement=true`, with `k8sServiceHost` set to the first
-  control plane's static IP, since there's no kube-proxy to program the
-  `kubernetes` Service.
-- `routingMode=tunnel`, `tunnelProtocol=vxlan`. The tunnel keeps pod
-  routing independent of the underlay, which matters once CPU↔GPU traffic
-  crosses WireGuard in Phase 3.
-- `ipam.mode=kubernetes`: pod CIDRs come from the node objects (k3s
-  10.42.0.0/16, kubeadm 10.244.0.0/16).
-- Hubble with relay.
-- CNI paths are Cilium's defaults for both distros. With
-  `--flannel-backend none`, k3s leaves containerd on `/etc/cni/net.d` and
-  `/opt/cni/bin`.
-
-Install order: control plane → API ready → Cilium → remaining nodes → all
-Ready → `cilium status --wait`. Nodes can't become Ready before the CNI runs.
-
-Node requirements Cilium surfaced (details in [failure-modes.md](failure-modes.md)):
-shared mount propagation for `/` and `/sys/fs/bpf` inside node VMs, and
-`CONFIG_INET_DIAG` + `CONFIG_INET_UDP_DIAG` + `CONFIG_INET_DIAG_DESTROY` in
-the guest kernel.
-
-Cilium 1.20 is e2e-tested on Kubernetes 1.33–1.36. kona's default 1.37 is
-outside that list, but the full `cilium connectivity test` passes on it for
-both distros ([gates.md](gates.md)).

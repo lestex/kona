@@ -39,19 +39,8 @@ func newCreateClusterCmd(g *globals) *cobra.Command {
 				}
 				o.Kernel = k
 			}
-			if o.GPUImage == "" {
-				img, err := g.defaultGPUImage()
-				if err != nil {
-					return err
-				}
-				o.GPUImage = img
-			}
 			run := execx.OS{}
-			dopts := doctor.Options{GPU: o.GPUWorkers > 0, Kernel: o.Kernel}
-			if o.GPUWorkers > 0 {
-				dopts.GPUImage = o.GPUImage
-			}
-			rs := doctor.New(run).Run(ctx, dopts)
+			rs := doctor.New(run).Run(ctx, doctor.Options{Kernel: o.Kernel})
 			if doctor.Failed(rs) {
 				printDoctor(cmd.ErrOrStderr(), rs)
 				return errDoctorFailed
@@ -69,16 +58,11 @@ func newCreateClusterCmd(g *globals) *cobra.Command {
 	f := cmd.Flags()
 	f.IntVar(&o.Workers, "workers", 2, "number of worker nodes")
 	f.IntVar(&o.ControlPlanes, "control-planes", 1, "number of control-plane nodes (odd; >1 uses embedded etcd)")
-	f.IntVar(&o.GPUWorkers, "gpu-workers", 0, "number of krunkit GPU worker nodes (Vulkan via Venus; --distro k3s)")
-	f.IntVar(&o.GPUCPUs, "gpu-cpus", 4, "vCPUs per GPU node")
-	f.StringVar(&o.GPUMemory, "gpu-memory", "4G", "fixed memory per GPU node")
-	f.StringVar(&o.GPULink, "gpu-link", "relay", "how GPU nodes reach CPU nodes' WireGuard: relay (kona host relay) | publish (container run -p on each CPU node)")
-	f.StringVar(&o.GPUImage, "gpu-image", "", "GPU node disk image (default: the installed kona-gpu-node image)")
 	f.StringVar(&o.Distro, "distro", "k3s", "Kubernetes distribution: k3s|kubeadm")
 	f.StringVar(&o.CNI, "cni", "default", "CNI: default|cilium")
 	f.StringVar(&o.K8sVersion, "k8s-version", "", "Kubernetes version (default: the pinned one; must match a published node image)")
 	f.StringVar(&o.Image, "image", "", "node image (default: ghcr.io/lestex/kona-node:<version>)")
-	f.StringVar(&o.Kernel, "kernel", "", "guest kernel for Apple container nodes (default: the installed kona kernel)")
+	f.StringVar(&o.Kernel, "kernel", "", "guest kernel for the nodes (default: the installed kona kernel)")
 	f.StringVar(&o.DNS, "dns", "", "DNS server for nodes (default: the host's primary resolver)")
 	f.IntVar(&o.CPUs, "cpus", 2, "vCPUs per node")
 	f.StringVar(&o.Memory, "memory", "2G", "fixed memory per node (VMs do not balloon)")

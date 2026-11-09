@@ -155,7 +155,6 @@ type RunSpec struct {
 	Env     map[string]string
 	Labels  map[string]string
 	Volumes map[string]string // volume name -> mount path
-	Publish []string          // [host-ip:]host-port:container-port[/proto]
 	Args    []string          // arguments to the image entrypoint
 }
 
@@ -199,9 +198,6 @@ func RunArgs(s RunSpec) []string {
 	args = append(args, labelArgs(s.Labels)...)
 	for _, k := range sortedKeys(s.Volumes) {
 		args = append(args, "-v", k+":"+s.Volumes[k])
-	}
-	for _, p := range s.Publish {
-		args = append(args, "-p", p)
 	}
 	args = append(args, s.Image)
 	return append(args, s.Args...)

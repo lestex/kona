@@ -1,11 +1,15 @@
 # kona playground: reproduce Phase 0 by hand
 
+> The krunkit and GPU parts of Phase 0 fed GPU node support, which was
+> removed on 2026-11-08 (see the `gpu` branch). The spikes still run as
+> records of those experiments.
+
 A hands-on walkthrough of every Phase 0 experiment: the custom guest kernel,
 a krunkit VM with Vulkan-over-Venus, and the networking between Apple
 `container` VMs and krunkit VMs. Each step is a script in `spikes/`, prints
 real output, and can be re-run. The results are summarized in
 [gates.md](gates.md), and the reasoning is in [kernel.md](kernel.md),
-[gpu.md](gpu.md) and [networking.md](networking.md).
+`gpu.md` (on the `gpu` branch) and [networking.md](networking.md).
 
 All of this was verified end to end from a clean slate on macOS 26.6.2, on an
 Apple M3 Pro with 18 GiB.

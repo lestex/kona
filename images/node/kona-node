@@ -47,7 +47,6 @@ ip link del kona-chk >/dev/null 2>&1 || true
 for feature in ${KONA_REQUIRE:-}; do
   case $feature in
     CONFIG_NET_SCH_INGRESS) check "$feature" tc qdisc add dev lo clsact; tc qdisc del dev lo clsact >/dev/null 2>&1 || true ;;
-    CONFIG_WIREGUARD) check "$feature" ip link add kona-wg type wireguard; ip link del kona-wg >/dev/null 2>&1 || true ;;
     CONFIG_GENEVE) check "$feature" ip link add kona-gnv type geneve id 1 remote 127.0.0.1; ip link del kona-gnv >/dev/null 2>&1 || true ;;
   esac
 done
@@ -85,9 +84,6 @@ if ! mountpoint -q /sys/fs/bpf; then
   mount -t bpf bpf /sys/fs/bpf
 fi
 mount --make-shared /sys/fs/bpf
-
-# WireGuard link to GPU nodes, if kona configured one before a restart.
-/usr/local/bin/kona-wg || log "kona-wg failed; GPU nodes may be unreachable"
 
 sysctl -qw net.ipv4.ip_forward=1
 sysctl -qw net.bridge.bridge-nf-call-iptables=1
