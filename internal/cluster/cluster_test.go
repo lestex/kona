@@ -681,3 +681,38 @@ func TestCreateFailsWhenSystemPodsCrash(t *testing.T) {
 		t.Fatalf("not rolled back: %v", s.containers)
 	}
 }
+
+func TestStopNodeKeepsControlPlaneQuorum(t *testing.T) {
+	m, s, _, o := setup(t)
+	if err := m.Create(context.Background(), o); err != nil {
+		t.Fatal(err)
+	}
+	err := m.StopNodes(context.Background(), "kona", []string{"kona-control-plane-1"})
+	if err == nil || !strings.Contains(err.Error(), "kona stop cluster kona") || len(s.stopped) != 0 {
+		t.Fatalf("stopping the only control plane: err=%v stopped=%v", err, s.stopped)
+	}
+	if err := m.StopNodes(context.Background(), "kona", []string{"kona-worker-1"}); err != nil {
+		t.Fatalf("workers can still be stopped: %v", err)
+	}
+	if err := m.Stop(context.Background(), "kona"); err != nil {
+		t.Fatalf("stop cluster is always allowed: %v", err)
+	}
+}
+
+func TestKeepsQuorumHA(t *testing.T) {
+	c := &state.Cluster{Name: "ha"}
+	running := map[string]container.Container{}
+	for i := 1; i <= 3; i++ {
+		n := fmt.Sprintf("ha-control-plane-%d", i)
+		c.Nodes = append(c.Nodes, state.Node{Name: n, Role: state.RoleControlPlane})
+		ct := container.Container{ID: n}
+		ct.Status.State = "running"
+		running[n] = ct
+	}
+	if err := keepsQuorum(c, map[string]bool{"ha-control-plane-1": true}, running); err != nil {
+		t.Fatalf("1 of 3 down keeps quorum: %v", err)
+	}
+	if err := keepsQuorum(c, map[string]bool{"ha-control-plane-1": true, "ha-control-plane-2": true}, running); err == nil {
+		t.Fatal("2 of 3 down breaks quorum")
+	}
+}
