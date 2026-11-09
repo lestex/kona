@@ -29,7 +29,15 @@ func newDoctorCmd(g *globals) *cobra.Command {
 				}
 				kernel = k
 			}
-			rs := doctor.New(execx.OS{}).Run(cmd.Context(), doctor.Options{GPU: gpu, Kernel: kernel})
+			opts := doctor.Options{GPU: gpu, Kernel: kernel}
+			if gpu {
+				img, err := g.defaultGPUImage()
+				if err != nil {
+					return err
+				}
+				opts.GPUImage = img
+			}
+			rs := doctor.New(execx.OS{}).Run(cmd.Context(), opts)
 			if done, err := printStructured(cmd.OutOrStdout(), output, rs); done {
 				if err != nil {
 					return err

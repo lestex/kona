@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -42,6 +43,8 @@ type Options struct {
 	GPU bool
 	// Kernel is the kona kernel path to verify ("" = skip).
 	Kernel string
+	// GPUImage is the GPU node disk image to verify ("" = skip).
+	GPUImage string
 }
 
 // Doctor runs checks with injectable host access.
@@ -68,6 +71,9 @@ func (d *Doctor) Run(ctx context.Context, o Options) []Result {
 	}
 	rs = append(rs, d.dns(ctx))
 	rs = append(rs, d.krunkit(ctx, o.GPU), d.vmnetHelper(ctx, o.GPU))
+	if o.GPUImage != "" {
+		rs = append(rs, d.gpuImage(o.GPUImage))
+	}
 	return rs
 }
 
@@ -164,6 +170,18 @@ func (d *Doctor) kernel(path string) Result {
 			r.Fix = fix
 			return r
 		}
+	}
+	r.Status, r.Message = OK, path
+	return r
+}
+
+func (d *Doctor) gpuImage(path string) Result {
+	r := Result{Name: "gpu-image"}
+	if _, err := d.Stat(path); err != nil {
+		r.Status, r.Message = Fail, "GPU node disk image not found at "+path
+		r.Fix = "make -C images/gpu-node && mkdir -p \"$(dirname '" + path + "')\" && cp -c images/gpu-node/out/" +
+			filepath.Base(path) + " '" + path + "'  (or pass --gpu-image)"
+		return r
 	}
 	r.Status, r.Message = OK, path
 	return r

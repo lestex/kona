@@ -1,0 +1,93 @@
+# kona-venus-dra: DRA driver for krunkit GPU nodes (Vulkan via Venus).
+# Applied by kona when a cluster has GPU workers with Venus. Driver name
+# venus.kona.example.invalid is a placeholder (see dra/kona-venus-dra/pkg/driver/consts.go).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kona-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kona-venus-dra
+  namespace: kona-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kona-venus-dra
+rules:
+  - apiGroups: ["resource.k8s.io"]
+    resources: ["resourceslices"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["resource.k8s.io"]
+    resources: ["resourceclaims"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kona-venus-dra
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kona-venus-dra
+subjects:
+  - kind: ServiceAccount
+    name: kona-venus-dra
+    namespace: kona-system
+---
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: kona-gpu
+spec:
+  selectors:
+    - cel:
+        expression: device.driver == "venus.kona.example.invalid"
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kona-venus-dra
+  namespace: kona-system
+  labels: {app.kubernetes.io/name: kona-venus-dra}
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: kona-venus-dra}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: kona-venus-dra}
+    spec:
+      serviceAccountName: kona-venus-dra
+      # Only GPU workers where kona verified Venus.
+      nodeSelector: {kona.dev/gpu: venus}
+      tolerations:
+        - {key: kona.dev/gpu, operator: Exists, effect: NoSchedule}
+      priorityClassName: system-node-critical
+      containers:
+        - name: plugin
+          image: ghcr.io/lestex/kona-venus-dra:v0.1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NODE_NAME
+              valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
+          securityContext:
+            # Needed to open /dev/dri/renderD128 (device cgroup) for
+            # vulkaninfo; workloads get the device only through CDI.
+            privileged: true
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+          volumeMounts:
+            - {name: plugins-registry, mountPath: /var/lib/kubelet/plugins_registry}
+            - {name: plugins, mountPath: /var/lib/kubelet/plugins}
+            - {name: cdi, mountPath: /var/run/cdi}
+            - {name: dri, mountPath: /dev/dri}
+      volumes:
+        - {name: plugins-registry, hostPath: {path: /var/lib/kubelet/plugins_registry, type: DirectoryOrCreate}}
+        - {name: plugins, hostPath: {path: /var/lib/kubelet/plugins, type: DirectoryOrCreate}}
+        - {name: cdi, hostPath: {path: /var/run/cdi, type: DirectoryOrCreate}}
+        - {name: dri, hostPath: {path: /dev/dri, type: Directory}}

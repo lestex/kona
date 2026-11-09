@@ -9,7 +9,9 @@ b=${2:?server node}
 ns=kona-gate
 k() { kubectl -n "$ns" "$@"; }
 
-kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+# A previous run's namespace may still be terminating.
+kubectl delete namespace "$ns" --ignore-not-found --wait=true >/dev/null
+kubectl create namespace "$ns" >/dev/null
 trap 'kubectl delete namespace "$ns" --wait=false >/dev/null 2>&1 || true' EXIT
 k run client --image=busybox:1.37 --restart=Never \
   --overrides="{\"spec\":{\"nodeName\":\"$a\",\"tolerations\":[{\"operator\":\"Exists\"}]}}" -- sleep 3600 >/dev/null

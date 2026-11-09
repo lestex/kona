@@ -47,6 +47,10 @@ type Node struct {
 	CPUs   int    `json:"cpus"`
 	Memory string `json:"memory"`
 	Volume string `json:"volume,omitempty"`
+	// WGPort is the host UDP port that `container` publishes to this CPU
+	// node's WireGuard port, so krunkit GPU nodes can reach it (0 on GPU
+	// nodes and on clusters created before GPU support).
+	WGPort int `json:"wgPort,omitempty"`
 }
 
 // Network is the cluster's `container` network.
@@ -59,17 +63,24 @@ type Network struct {
 
 // Cluster is the persisted inventory.
 type Cluster struct {
-	Name       string    `json:"name"`
-	Distro     string    `json:"distro"`
-	CNI        string    `json:"cni"`
-	K8sVersion string    `json:"k8sVersion"`
-	Image      string    `json:"image"`
-	Kernel     string    `json:"kernel"`
-	DNS        string    `json:"dns"`
-	Phase      string    `json:"phase"`
-	Network    Network   `json:"network"`
-	Nodes      []Node    `json:"nodes"`
-	CreatedAt  time.Time `json:"createdAt"`
+	Name       string  `json:"name"`
+	Distro     string  `json:"distro"`
+	CNI        string  `json:"cni"`
+	K8sVersion string  `json:"k8sVersion"`
+	Image      string  `json:"image"`
+	Kernel     string  `json:"kernel"`
+	DNS        string  `json:"dns"`
+	Phase      string  `json:"phase"`
+	Network    Network `json:"network"`
+	// GPUNetwork is the vmnet-helper network krunkit GPU nodes share. It is
+	// separate from Network because vmnet refuses to put a second network
+	// on a `container` network's subnet (docs/networking.md).
+	GPUNetwork Network `json:"gpuNetwork,omitzero"`
+	// GPULinkMode is how GPU nodes reach CPU nodes' WireGuard ports
+	// (GPULinkRelay or GPULinkPublish); empty means relay.
+	GPULinkMode string    `json:"gpuLink,omitempty"`
+	Nodes       []Node    `json:"nodes"`
+	CreatedAt   time.Time `json:"createdAt"`
 }
 
 // ControlPlanes returns the control-plane nodes in order.
@@ -79,6 +90,38 @@ func (c *Cluster) byRole(role string) []Node {
 	var out []Node
 	for _, n := range c.Nodes {
 		if n.Role == role {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// GPU link modes: how WireGuard packets from GPU nodes reach CPU nodes.
+const (
+	// GPULinkRelay: a kona-run UDP relay per CPU node on the host.
+	GPULinkRelay = "relay"
+	// GPULinkPublish: `container run -p` on each CPU node. Needs the
+	// container runtime to hold macOS Local Network permission, which
+	// Homebrew's ad-hoc-signed builds cannot keep (docs/failure-modes.md).
+	GPULinkPublish = "publish"
+)
+
+// GPULink returns the cluster's GPU link mode (relay when unset).
+func (c *Cluster) GPULink() string {
+	if c.GPULinkMode == "" {
+		return GPULinkRelay
+	}
+	return c.GPULinkMode
+}
+
+// GPUNodes returns the krunkit GPU worker nodes in order.
+func (c *Cluster) GPUNodes() []Node { return c.byRole(RoleGPUWorker) }
+
+// CPUNodes returns the Apple `container` nodes in order.
+func (c *Cluster) CPUNodes() []Node {
+	var out []Node
+	for _, n := range c.Nodes {
+		if n.Kind == KindContainer {
 			out = append(out, n)
 		}
 	}

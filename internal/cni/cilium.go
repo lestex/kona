@@ -3,11 +3,20 @@
 package cni
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/lestex/kona/internal/state"
 	"github.com/lestex/kona/internal/version"
 )
+
+// GPUUnderlayMTU is the smallest underlay MTU once GPU nodes exist: the
+// WireGuard link (wg0, 1420). The Cilium chart's MTU value is the underlay
+// MTU; Cilium keeps the VXLAN overhead (50 bytes) off the pod path itself.
+// Measured with DF pings CPU pod -> GPU pod: MTU=1420 passes 1370-byte
+// packets and refuses 1380 (pod eth0 still shows 1420); MTU=1370 only
+// passes 1320. So 1420 is exact, and anything larger fragments on wg0.
+const GPUUnderlayMTU = 1420
 
 // CiliumVersion is the pinned Cilium release without the leading "v".
 func CiliumVersion() string { return strings.TrimPrefix(version.Get("CILIUM_VERSION"), "v") }
@@ -37,6 +46,11 @@ func CiliumInstallArgs(c *state.Cluster, kubeconfig, context string) []string {
 		"--set", "operator.replicas=1",
 		"--set", "hubble.enabled=true",
 		"--set", "hubble.relay.enabled=true",
+	}
+	if len(c.GPUNodes()) > 0 {
+		// CPU<->GPU traffic crosses WireGuard (wg0, MTU 1420). The chart key
+		// is upper-case MTU; a lower-case "mtu" is silently ignored.
+		args = append(args, "--set", "MTU="+strconv.Itoa(GPUUnderlayMTU))
 	}
 	return args
 }

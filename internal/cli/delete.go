@@ -4,9 +4,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/lestex/kona/internal/cluster"
-	"github.com/lestex/kona/internal/execx"
-	"github.com/lestex/kona/internal/runtime/container"
 	"github.com/spf13/cobra"
 )
 
@@ -24,7 +21,7 @@ func newDeleteClusterCmd(g *globals) *cobra.Command {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			m := cluster.NewManager(g.store, container.New(execx.OS{}), execx.OS{}, cmd.ErrOrStderr())
+			m := g.manager(cmd)
 			var names []string
 			switch {
 			case all && len(args) > 0:
