@@ -1,0 +1,75 @@
+# Builds the docs site on every docs change and publishes it to GitHub Pages
+# (https://lestex.github.io/kona/) from a v* tag only: readers run the
+# released binary, so main would document behavior they don't have yet.
+# Pages must be set to "GitHub Actions" in Settings -> Pages.
+name: docs
+
+on:
+  push:
+    # Both refs: a push trigger naming only branches ignores tags entirely.
+    branches: [main]
+    tags: ["v*"]
+    # Skips code-only pushes. Not evaluated for tags, so a release always
+    # publishes.
+    paths:
+      - docs/**
+      - mkdocs.yml
+      - docs-requirements.txt
+      - .github/workflows/docs.yml
+  pull_request:
+    paths:
+      - docs/**
+      - mkdocs.yml
+      - docs-requirements.txt
+      - .github/workflows/docs.yml
+  # Redeploy a release's docs without moving the tag: run it on the tag ref.
+  workflow_dispatch:
+
+# Only deploy needs Pages write, and it asks for that itself, so pull
+# request builds never get it.
+permissions:
+  contents: read
+
+# Keyed by ref, so a push to main never cancels a tag's deployment.
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: docs-requirements.txt
+
+      - run: pip install -r docs-requirements.txt
+
+      # --strict: a broken internal link fails the build instead of becoming
+      # a 404 someone finds later.
+      - run: mkdocs build --strict
+        env:
+          NO_MKDOCS_2_WARNING: "true"
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
