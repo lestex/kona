@@ -219,14 +219,16 @@ func (m *Manager) ensureRegistry(ctx context.Context, c *state.Cluster) error {
 			return err
 		}
 		m.logf("• Starting %s (%s)", r.Name, r.IP)
-		// `container` has no static IP option, so the registry adds kona's
-		// address itself, as node entrypoints do (docs/networking.md).
+		// `container` has no static IP option and its address can be a
+		// node's static IP, so the registry swaps it for kona's address, as
+		// node entrypoints do (docs/networking.md).
 		if err := m.Container.Run(ctx, container.RunSpec{
 			Name: r.Name, Image: RegistryImage(), Network: c.Network.Name, MAC: r.MAC, MTU: nodeMTU,
 			CPUs: 1, Memory: "512M", Labels: labels, Volumes: map[string]string{r.Volume: registryDataDir},
 			Entrypoint: "sh",
-			Args: []string{"-c", fmt.Sprintf("ip addr add %s/%d dev eth0 && exec registry serve /etc/distribution/config.yml",
-				r.IP, c.Network.Prefix)},
+			Args: []string{"-c", fmt.Sprintf("gw=$(ip -4 route show default | awk '{print $3; exit}') && "+
+				"ip -4 addr flush dev eth0 && ip addr add %s/%d dev eth0 && ip route add default via \"$gw\" && "+
+				"exec registry serve /etc/distribution/config.yml", r.IP, c.Network.Prefix)},
 		}); err != nil {
 			return err
 		}

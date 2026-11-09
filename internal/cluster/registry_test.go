@@ -71,7 +71,7 @@ func TestLoadImages(t *testing.T) {
 		"image push --scheme http --progress none --platform linux/arm64 192.168.70.200:5000/ghcr.io/lestex/tool:v1",
 		"image rm 192.168.70.200:5000/docker.io/library/myapp:dev",
 		"--entrypoint sh",
-		"ip addr add 192.168.70.200/24 dev eth0",
+		"ip -4 addr flush dev eth0 && ip addr add 192.168.70.200/24 dev eth0",
 	} {
 		if !strings.Contains(calls, want) {
 			t.Errorf("no %q in:\n%s", want, calls)
