@@ -48,3 +48,19 @@ data. Clusters made by an older kona with GPU nodes are refused by `start`,
 Not done here: `stop node` doesn't cordon or drain. Stopping a node is like
 pulling its power, and pods on it are rescheduled by the usual node-lifecycle
 timeouts.
+
+## Support bundle
+
+`kona support bundle [NAME] [-o FILE]` writes a `.tar.gz` for debugging:
+`cluster.json`, `kona version`, `kona doctor`, the `verify` report, `get
+nodes`, `container`'s view (version, system status, VMs, networks, volumes),
+the host's macOS version and DNS configuration, and per node its `container
+logs`, IP/route/resolver config, `dmesg`, processes, disk usage and (on
+kubeadm nodes) the kubelet/containerd journal. From the control plane it adds
+nodes, pods, DaemonSets, events and `kubectl describe nodes`.
+
+It only reads. A step that fails records its error in its file instead of
+stopping the bundle. Secrets files and the kubeconfig are never included,
+and the cluster's secret values (join tokens) are replaced with `<redacted>`
+wherever they appear in collected output. Review the bundle before sharing
+it: logs can still contain hostnames and IPs.
