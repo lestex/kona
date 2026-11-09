@@ -47,11 +47,7 @@ func newCreateClusterCmd(g *globals) *cobra.Command {
 				o.GPUImage = img
 			}
 			run := execx.OS{}
-			dopts := doctor.Options{GPU: o.GPUWorkers > 0, Kernel: o.Kernel}
-			if o.GPUWorkers > 0 {
-				dopts.GPUImage = o.GPUImage
-			}
-			rs := doctor.New(run).Run(ctx, dopts)
+			rs := doctor.New(run).Run(ctx, doctor.Options{Kernel: o.Kernel})
 			if doctor.Failed(rs) {
 				printDoctor(cmd.ErrOrStderr(), rs)
 				return errDoctorFailed

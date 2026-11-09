@@ -14,12 +14,11 @@ import (
 var errDoctorFailed = errors.New("host prerequisites are not met (see fixes above)")
 
 func newDoctorCmd(g *globals) *cobra.Command {
-	var gpu bool
 	var kernel string
 	var output string
 	cmd := &cobra.Command{
 		Use:   "doctor",
-		Short: "Check host prerequisites: macOS, arch, container, kernel, DNS, krunkit, vmnet-helper",
+		Short: "Check host prerequisites: macOS, arch, container, kernel, DNS",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if kernel == "" {
@@ -29,15 +28,7 @@ func newDoctorCmd(g *globals) *cobra.Command {
 				}
 				kernel = k
 			}
-			opts := doctor.Options{GPU: gpu, Kernel: kernel}
-			if gpu {
-				img, err := g.defaultGPUImage()
-				if err != nil {
-					return err
-				}
-				opts.GPUImage = img
-			}
-			rs := doctor.New(execx.OS{}).Run(cmd.Context(), opts)
+			rs := doctor.New(execx.OS{}).Run(cmd.Context(), doctor.Options{Kernel: kernel})
 			if done, err := printStructured(cmd.OutOrStdout(), output, rs); done {
 				if err != nil {
 					return err
@@ -51,7 +42,6 @@ func newDoctorCmd(g *globals) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&gpu, "gpu", false, "treat GPU prerequisites (krunkit, vmnet-helper) as required")
 	cmd.Flags().StringVar(&kernel, "kernel", "", "kona guest kernel to check (default: the installed one)")
 	addOutputFlag(cmd, &output)
 	return cmd

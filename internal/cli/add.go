@@ -4,8 +4,6 @@ import (
 	"time"
 
 	"github.com/lestex/kona/internal/cluster"
-	"github.com/lestex/kona/internal/doctor"
-	"github.com/lestex/kona/internal/execx"
 	"github.com/spf13/cobra"
 )
 
@@ -36,11 +34,6 @@ func newAddNodeCmd(g *globals) *cobra.Command {
 						return err
 					}
 					o.GPUImage = img
-				}
-				rs := doctor.New(execx.OS{}).Run(ctx, doctor.Options{GPU: true, GPUImage: o.GPUImage})
-				if doctor.Failed(rs) {
-					printDoctor(cmd.ErrOrStderr(), rs)
-					return errDoctorFailed
 				}
 			}
 			return g.manager(cmd).AddNode(ctx, o)

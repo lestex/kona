@@ -17,10 +17,7 @@ func healthy() *execx.Fake {
 		"container system status": {Out: []byte("status              running\npaths.installRoot   /opt/homebrew/Cellar/container/1.5.0/\n")},
 		"sh -c codesign -dv --verbose=2 \"$1\" 2>&1 sh /opt/homebrew/Cellar/container/1.5.0/libexec/container-plugins/container-runtime-linux/bin/container-runtime-linux": {
 			Out: []byte("Identifier=com.apple.container.container-runtime-linux\nSignature=adhoc\nTeamIdentifier=not set\n")},
-		"scutil --dns":               {Out: []byte("resolver #1\n  nameserver[0] : 8.8.8.8\n")},
-		"krunkit --version":          {Out: []byte("krunkit 1.3.2\n")},
-		"brew --prefix vmnet-helper": {Out: []byte("/opt/homebrew/opt/vmnet-helper\n")},
-		"/opt/homebrew/opt/vmnet-helper/libexec/vmnet-helper --version": {Out: []byte("version: v0.13.0\n")},
+		"scutil --dns": {Out: []byte("resolver #1\n  nameserver[0] : 8.8.8.8\n")},
 	}}
 }
 
@@ -39,7 +36,7 @@ func find(rs []Result, name string) Result {
 }
 
 func TestHealthyHost(t *testing.T) {
-	rs := newDoctor(healthy()).Run(context.Background(), Options{GPU: true, Kernel: "/k"})
+	rs := newDoctor(healthy()).Run(context.Background(), Options{Kernel: "/k"})
 	if Failed(rs) {
 		t.Fatalf("healthy host failed: %+v", rs)
 	}
@@ -65,26 +62,6 @@ func TestMissingContainerAndKernel(t *testing.T) {
 	}
 	if k := find(rs, "kernel"); k.Status != Fail || !strings.Contains(k.Fix, "make -C kernel") {
 		t.Fatalf("kernel result = %+v", k)
-	}
-}
-
-func TestGPUToolsOnlyFailWhenRequested(t *testing.T) {
-	f := healthy()
-	f.Responses["krunkit --version"] = execx.FakeResponse{Err: errors.New("not found")}
-	if r := find(newDoctor(f).Run(context.Background(), Options{}), "krunkit"); r.Status != Warn {
-		t.Fatalf("krunkit without --gpu = %+v, want warn", r)
-	}
-	if r := find(newDoctor(f).Run(context.Background(), Options{GPU: true}), "krunkit"); r.Status != Fail {
-		t.Fatalf("krunkit with --gpu = %+v, want fail", r)
-	}
-}
-
-func TestDeprecatedKrunkitTap(t *testing.T) {
-	f := healthy()
-	f.Responses["brew list --full-name"] = execx.FakeResponse{Out: []byte("slp/krunkit/krunkit\n")}
-	r := find(newDoctor(f).Run(context.Background(), Options{GPU: true}), "krunkit")
-	if r.Status != Fail || !strings.Contains(r.Fix, "brew untap slp/krunkit") {
-		t.Fatalf("deprecated tap result = %+v", r)
 	}
 }
 
