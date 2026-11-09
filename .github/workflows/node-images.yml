@@ -1,0 +1,70 @@
+# Builds the kona node images and, on main, publishes them to
+# ghcr.io/lestex/kona-node, the default `kona create` pulls from.
+#
+# On GitHub's native arm64 Linux runners with docker buildx: the images are
+# linux/arm64 only, and macOS runners cannot run Apple `container` builds.
+# The build args come from images/node/Makefile, the same ones a local
+# `container build` uses; only the builder is swapped (BUILD=...).
+#
+# Tags are the Kubernetes versions from versions.env, so a change to the
+# node image files republishes the same tag. kona pulls by tag; nodes that
+# already have the image keep it until it is removed from `container`.
+name: node-images
+
+on:
+  pull_request:
+    paths:
+      - images/node/**
+      - versions.env
+      - .github/workflows/node-images.yml
+  push:
+    branches: [main]
+    paths:
+      - images/node/**
+      - versions.env
+      - .github/workflows/node-images.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: node-images-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write # pushing to GHCR
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: k3s
+            target: build
+          - distro: kubeadm
+            target: build-kubeadm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # PRs build only; main and manual runs push. The source label is what
+      # makes GHCR link the package to this repository. --provenance=false
+      # keeps the image a single arm64 manifest, as a local `container
+      # build` makes, with no attestation manifest beside it.
+      - name: Build ${{ matrix.distro }}
+        working-directory: images/node
+        env:
+          PUSH: ${{ github.event_name != 'pull_request' && '--push' || '--load' }}
+        run: |
+          make ${{ matrix.target }} BUILD="docker buildx build --platform linux/arm64 $PUSH \
+            --label org.opencontainers.image.source=https://github.com/${{ github.repository }} \
+            --label org.opencontainers.image.revision=${{ github.sha }} \
+            --provenance=false"
