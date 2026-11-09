@@ -4,7 +4,7 @@
 |---|---|
 | `kona stop cluster [NAME]` | Stops every node and keeps VMs, disks and state. Order: workers, then control planes, so agents never outlive the API. `container` nodes get `container stop --time 30`, so init shuts k3s/kubelet down cleanly. |
 | `kona start cluster [NAME] [--wait 5m]` | Boots stopped nodes, control planes first, then waits until `kona verify cluster` passes. |
-| `kona stop node NODE... [--name NAME]` | Stops just those nodes. |
+| `kona stop node NODE... [--name NAME]` | Stops just those nodes. Refuses to stop control planes if fewer than etcd quorum (a majority, so the only one in a single-control-plane cluster) would stay running, since the API would go down; use `kona stop cluster` for that. |
 | `kona start node NODE... [--name NAME] [--wait 5m]` | Boots just those nodes and waits for them, and for the cluster, to be healthy. |
 | `kona verify cluster [NAME] [-o json\|yaml]` | Read-only health checks. Exits 1 if any check fails. |
 
