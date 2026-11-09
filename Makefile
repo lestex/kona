@@ -1,4 +1,4 @@
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION ?= $(shell git describe --tags --match 'v*' --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 MATRIX  := $(shell grep -E '^[A-Z0-9_]+=' versions.env | grep -vE '_(SHA256[A-Z0-9_]*|DIGEST)=' | paste -sd, -)
 SUMS    := $(shell grep -E '^[A-Z0-9_]+_SHA256[A-Z0-9_]*=' versions.env | paste -sd, -)
@@ -28,8 +28,11 @@ fmt-check:
 check: fmt-check lint test
 
 # The release build, for this Mac only, into dist/.
+# Only v* tags are kona versions; kernel-* tags are kernel releases
+# (.github/workflows/kernel.yml), which GoReleaser would otherwise take.
 snapshot:
-	goreleaser build --snapshot --clean --single-target
+	GORELEASER_CURRENT_TAG=$$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo v0.0.0) \
+	  goreleaser build --snapshot --clean --single-target
 
 # CHANGELOG.md from the commit log, by the same cliff.toml the release
 # notes come from. git-cliff from PATH (brew install git-cliff), else its

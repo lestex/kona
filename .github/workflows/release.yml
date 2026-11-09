@@ -76,6 +76,9 @@ jobs:
           args: release --clean --release-notes ${{ runner.temp }}/RELEASE_NOTES.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The pushed tag, not whichever tag git finds: kernel-* tags
+          # (kernel.yml) can point at the same commit.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
           # The cask is committed to lestex/homebrew-tap, which GITHUB_TOKEN
           # cannot write to: it is scoped to this repository. A PAT with
           # contents:write on the tap; without it the cask step fails, and
