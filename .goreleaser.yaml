@@ -1,0 +1,124 @@
+# Release builds. Driven by a v* tag through .github/workflows/release.yml,
+# and exercised on every PR by `goreleaser build --snapshot` in ci.yml so a
+# build that stopped working is found before a tag depends on it.
+#
+#   make snapshot                    # goreleaser build --snapshot, with the matrix
+#   goreleaser check                 # validate this file
+#
+# The pinned component matrix (versions.env) is linked into the binary from
+# KONA_MATRIX and KONA_SUMS, which the Makefile computes and exports. Run
+# goreleaser through make, or with those set (`make -s release-env`): a
+# build without them fails here rather than producing a kona that knows no
+# versions.
+version: 2
+
+project_name: kona
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: kona
+    main: ./cmd/kona
+    binary: kona
+    env:
+      - CGO_ENABLED=0
+    # kona drives Apple `container`, which runs on Apple silicon only.
+    goos: [darwin]
+    goarch: [arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/lestex/kona/internal/version.Version={{ .Version }}
+      - -X github.com/lestex/kona/internal/version.Commit={{ .ShortCommit }}
+      - -X 'github.com/lestex/kona/internal/version.matrix={{ .Env.KONA_MATRIX }}'
+      - -X 'github.com/lestex/kona/internal/version.checksums={{ .Env.KONA_SUMS }}'
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: kona
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - CHANGELOG.md
+
+checksum:
+  name_template: checksums.txt
+
+# `brew install lestex/tap/kona`, written into github.com/lestex/homebrew-tap
+# on every tag. Always the qualified name: homebrew-core has an unrelated
+# `kona` formula (the K language), which a bare `brew install kona` gets.
+homebrew_casks:
+  - name: kona
+    repository:
+      owner: lestex
+      name: homebrew-tap
+      # Not GITHUB_TOKEN: that one is scoped to this repository, and the
+      # tap is a different one. See docs/release.md.
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: https://github.com/lestex/kona
+    description: Kubernetes clusters on Apple silicon, one Apple container VM per node
+    binaries: [kona]
+    # The runtime kona drives. homebrew-core's formula, as docs/versions.md
+    # explains.
+    dependencies:
+      - formula: container
+    # A -rc or -beta tag must not become what `brew install` hands people.
+    skip_upload: auto
+    # macOS 26 (Tahoe) or later, as `container` needs. Apple silicon comes
+    # from the arm64-only build: GoReleaser writes `depends_on arch: :arm64`.
+    #
+    # The binary is not signed or notarized, so macOS quarantines it and
+    # Gatekeeper refuses to run it; stripping the attribute is what every
+    # unsigned cask does. custom_block rather than `hooks`: `hooks`
+    # generates the deprecated `postflight do`. GoReleaser puts custom_block
+    # at the top of the cask, out of stanza order; release.yml's tap-style
+    # job runs `brew style --fix` afterwards, which moves it. custom_block is
+    # a Go template, so Homebrew's {{staged_path}} is written as a quoted
+    # template string to come through literally.
+    custom_block: |
+      depends_on macos: ">= :tahoe"
+
+      postflight_steps do
+        run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ "{{staged_path}}" }}/kona"]
+      end
+    # Uninstalling the binary leaves the clusters' VMs, volumes and networks
+    # in `container`; only kona knows which are its own.
+    caveats: |
+      kona's clusters live in Apple `container` and outlive the binary. Run
+        kona delete cluster NAME
+      for each cluster (`kona get clusters`) before `brew uninstall`.
+      `brew uninstall --zap` also removes kona's state and kubeconfigs.
+    # `brew uninstall --zap` only. State holds the clusters' join tokens and
+    # kubeconfigs; without it kona cannot find or delete its VMs any more,
+    # which is what the caveat above is about.
+    zap:
+      trash:
+        - ~/Library/Application Support/kona
+        - ~/.kube/kona-*
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+# The release notes come from git-cliff, generated from the same cliff.toml
+# that writes CHANGELOG.md, and passed in with --release-notes. This must
+# NOT say `disable: true`: --release-notes is read by the changelog pipe, so
+# disabling it throws the notes away too.
+changelog:
+  disable: false
+
+release:
+  # A -rc or -beta tag lands as a pre-release without anyone ticking a box.
+  prerelease: auto
+  footer: |
+    ---
+
+    **Requirements**: Apple silicon, macOS 26 (Tahoe) or later, and Apple
+    `container` (`brew install container`). Run `kona doctor` first.
+
+    Install with `brew install lestex/tap/kona`. The binary is not
+    notarized; the cask clears the quarantine flag, a tarball install
+    needs `xattr -dr com.apple.quarantine kona`.

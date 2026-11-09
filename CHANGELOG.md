@@ -1,0 +1,110 @@
+# Changelog
+
+Every release, newest first. Generated from the commit log by
+[git-cliff](https://git-cliff.org); run `make changelog` rather than
+editing this file by hand.
+
+## Unreleased
+
+- Init scaffold
+- Versions doc
+- Kernel spike
+- Krunkit spike
+- Net spike
+- Wifi change test
+- Playground doc
+- K3s node image
+- Container runtime client
+- Cluster state store
+- Address planning
+- Doctor command
+- K3s distro
+- Kubeconfig handling
+- Cluster create and delete
+- Create, delete, get, ssh commands
+- Concise wait errors
+- Phase1 k3s gate
+- Distro and network docs
+- Shellcheck clean spike scripts
+- Ci on macos-26: test, build, shellcheck
+- Kubeadm node image
+- Kubeadm distro
+- Wire distros into create
+- Phase1 kubeadm gate
+- Default to k8s 1.37
+- Pinned tool downloads
+- Cilium mode in distros
+- Install cilium on create
+- Isolate cilium cli from user helm
+- Shared mounts and default cni paths for cilium
+- Kernel: sock_diag for cilium kpr
+- Pod-to-pod gate script
+- Shared mounts on systemd nodes too
+- Phase2 cilium gate and failure modes
+- Gpu node disk image
+- Kona-wg in node images
+- Wireguard config
+- Gpu subnet and wg ports
+- Krunkit runtime
+- Gpu taint and cilium mtu
+- Gpu workers in create and delete
+- Add node, gpu flags, ssh to gpu nodes
+- Gate script waits for old namespace
+- Doctor --gpu checks gpu image
+- Kona-venus-dra driver
+- Kona-vulkan image
+- Dra manifests
+- Deploy dra driver on venus nodes
+- Dra: create plugin dirs
+- Capture krunkit logs
+- Vulkaninfo example
+- Dra gate script
+- Wait for published resourceslice
+- Vulkan compute example
+- Fix cilium mtu key for gpu clusters
+- Kona start cluster
+- Failure modes: sleep, reboot, container upgrade
+- Procx for detached helpers
+- Host udp relay for wireguard
+- Carry wireguard via host relay, not container publish
+- Cilium mtu 1420, measured
+- Revert host relay
+- Restore host relay
+- Gpu link flag: relay or publish
+- Document vmnet tso stall
+- Quote gate-dra namespace
+- Parse venus heap size
+- Share venus gpu by memory capacity
+- Read venus heap at startup
+- Kona-venus-dra v0.2.0
+- Keep tests off real gpu nodes and relays
+- Shared gpu example and docs
+- Start waits for fresh ready by boot id
+- Kona stop cluster
+- Kona start/stop node
+- Kona verify cluster
+- Start waits until verify passes
+- Lifecycle docs
+- Correct publish findings, measured
+- Doctor reports container build signing
+- Networking: gpu link modes
+- Llama.cpp vulkan example
+- Phase 3 gates
+- Drop gpu checks from doctor
+- Remove gpu nodes and wireguard link
+- Remove venus dra driver
+- Remove gpu images and examples
+- Node image without wireguard
+- Cpu-only docs
+- Use the host's ipv4 resolver
+- Document ipv6 resolver failure
+- Create waits for verify
+- Create waits too, in lifecycle doc
+- Document stale base image build failure
+- Nodes keep only kona's address
+- Load image via kona-registry
+- Registry docs and static address
+- Support bundle
+- Ci on main only
+- Stop node keeps control plane quorum
+- Registry logs in support bundle

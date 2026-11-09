@@ -1,0 +1,121 @@
+# Cuts a release from a v* tag: the darwin/arm64 binary, checksums, the
+# Homebrew cask in lestex/homebrew-tap, and release notes generated from the
+# same cliff.toml that writes CHANGELOG.md.
+#
+# The tag is the trigger and the source of the version; nothing is
+# committed anywhere to forget to bump. See docs/release.md.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  # So a release whose upload failed can be retried without moving a tag.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Pinned, and kept in step with the Makefile's CLIFF_IMAGE.
+  CLIFF_IMAGE: docker.io/orhunp/git-cliff:2.13.1
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # The same checks a PR had to pass, against the exact commit being
+  # released: a tag can be pushed at a commit CI never saw. On macOS, where
+  # kona's tests run in CI.
+  check:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: make check
+
+  release:
+    needs: check
+    # Linux: GoReleaser cross-compiles the darwin binary, and git-cliff runs
+    # from its pinned image, which macOS runners cannot start.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # creating the release and uploading to it
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # goreleaser needs the tags to work out a version, and git-cliff
+          # needs the history to write anything at all.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      # versions.env, flattened for the ldflags (.goreleaser.yaml).
+      - name: Component matrix
+        run: make -s release-env | tee -a "$GITHUB_ENV"
+
+      # Only the newest section, which is what belongs on the release page.
+      # Written into the work tree because that is what the container has
+      # mounted, then moved out: GoReleaser refuses to release from a dirty
+      # tree. --user makes the file the runner's, so it can be moved.
+      - name: Release notes
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -v "$PWD":/app -w /app ${{ env.CLIFF_IMAGE }} \
+            --config cliff.toml --latest --strip header --output RELEASE_NOTES.md
+          mv RELEASE_NOTES.md "$RUNNER_TEMP/RELEASE_NOTES.md"
+          cat "$RUNNER_TEMP/RELEASE_NOTES.md"
+
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          version: "~> v2"
+          args: release --clean --release-notes ${{ runner.temp }}/RELEASE_NOTES.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The cask is committed to lestex/homebrew-tap, which GITHUB_TOKEN
+          # cannot write to: it is scoped to this repository. A PAT with
+          # contents:write on the tap; without it the cask step fails, and
+          # the fix is to add the secret and re-run from the same tag.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+  # Brings the cask GoReleaser just committed to the tap up to `brew style`.
+  # GoReleaser puts custom_block at the top, out of stanza order, and indents
+  # arrays the way brew style rejects; all of it is autocorrectable.
+  #
+  # Cloned straight into Homebrew's Taps directory rather than `brew tap`:
+  # style has to run inside a tap, but `brew tap` loads every cask, and
+  # Homebrew refuses casks from a tap nobody ran `brew trust` on. Only
+  # kona.rb: the tap holds other casks. `test -f` because `brew style` on a
+  # missing file passes. The second `brew style` fails the job on anything
+  # left that cannot be corrected. Nothing to commit (a prerelease, or a
+  # re-run) is a success.
+  tap-style:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: Homebrew/actions/setup-homebrew@e99025eb970cfa124b8284a35463d87426917478 # 2026.09.28.1
+
+      - name: Correct the cask and push it
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          tap="$(brew --repository)/Library/Taps/lestex/homebrew-tap"
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/lestex/homebrew-tap.git" "$tap"
+          cd "$tap"
+          cask=Casks/kona.rb
+          test -f "$cask"
+          brew style --fix "$cask" || true
+          brew style "$cask"
+          if git diff --quiet -- "$cask"; then
+            echo "cask already passes brew style"
+            exit 0
+          fi
+          git diff -- "$cask"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "brew style --fix kona ${GITHUB_REF_NAME}" -- "$cask"
+          git push origin HEAD:main
