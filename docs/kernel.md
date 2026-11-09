@@ -28,8 +28,48 @@ kona therefore does **not** maintain its own kernel config. It uses
   kernel doesn't match, so a stale kernel from an older kona that lacks newer
   options is never used silently.
 - Output: `kernel/out/vmlinux-6.18.35-kona` (uncompressed arm64 `Image`,
-  ~30 MB) plus `.sha256` and the effective `.config`. It is released as
-  `kona-kernel-6.18.35-kona-arm64.tar.zst`.
+  ~30 MB) plus `.sha256` and the effective `.config`.
+
+## Reproducible build and release
+
+`build.sh` sets fixed values for the build user, host and time, so
+`/proc/version` reads `kona@kona … #1 SMP 1970-01-01 00:00:00 UTC`. With
+those fixed, the same source, config and builder image give a
+byte-identical `Image` on any machine. The config makes this possible: it
+has no modules, so no signing key, and no struct randomization.
+
+That is what lets CI publish the kernel the pin names:
+
+- `.github/workflows/kernel.yml` runs the same builder image and `build.sh`
+  under docker on GitHub's arm64 Linux runners.
+- `make -C kernel check` fails unless the result matches
+  `KONA_KERNEL_SHA256_ARM64`.
+- On main, it publishes the kernel, its `.sha256` and its config as the
+  GitHub release `kernel-<version>-<sha256[:12]>`. A new pin is a new
+  release; an existing release is never replaced.
+
+Users get the kernel with:
+
+```sh
+kona kernel install                                        # downloads that release
+kona kernel install --from kernel/out/vmlinux-6.18.35-kona # a local build
+```
+
+Either way, the file is checked against the pin before it is installed in
+`~/Library/Application Support/kona/kernels/`.
+
+A node VM keeps the kernel it was created with: `container` doesn't pick
+up a replaced file on stop and start. A new kernel therefore reaches new
+clusters and newly added nodes only. Existing nodes need to be recreated.
+
+To change the kernel, edit `kona.config` or bump `KERNEL_VERSION`, build
+with `make -C kernel`, and put the new sha256 in `versions.env`. The PR's
+kernel workflow then confirms that CI builds the same kernel.
+
+One part is not pinned: the builder's apt packages (gcc, binutils, pahole)
+come from the Ubuntu 22.04 archive at build time. If Ubuntu updates one,
+the next build stops matching the pin, and the check reports it rather than
+publishing a different kernel.
 
 ## Added options (effective diff, base → kona)
 

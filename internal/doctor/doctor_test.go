@@ -60,7 +60,7 @@ func TestMissingContainerAndKernel(t *testing.T) {
 	if c := find(rs, "container"); c.Status != Fail || c.Fix != "brew install container && container system start" {
 		t.Fatalf("container result = %+v", c)
 	}
-	if k := find(rs, "kernel"); k.Status != Fail || !strings.Contains(k.Fix, "make -C kernel") {
+	if k := find(rs, "kernel"); k.Status != Fail || !strings.Contains(k.Fix, "kona kernel install") {
 		t.Fatalf("kernel result = %+v", k)
 	}
 }
