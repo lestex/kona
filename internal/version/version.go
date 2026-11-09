@@ -15,7 +15,21 @@ var (
 	Commit = "unknown"
 	// matrix is versions.env flattened to "KEY=VALUE,KEY=VALUE".
 	matrix = ""
+	// checksums holds the *_SHA256* entries of versions.env, same format.
+	// Kept out of the matrix so `kona version` stays readable.
+	checksums = ""
 )
+
+// Checksum returns the pinned sha256 for key (e.g.
+// "CILIUM_CLI_SHA256_DARWIN_ARM64") or "".
+func Checksum(key string) string {
+	for _, c := range parse(checksums) {
+		if c.Name == key {
+			return c.Version
+		}
+	}
+	return ""
+}
 
 // Component is one pinned dependency.
 type Component struct {
