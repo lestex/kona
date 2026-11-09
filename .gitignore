@@ -1,10 +1,4 @@
 /bin/
 /dist/
-*.raw
-*.raw.xz
-*.qcow2
-*.iso
-*.tar.xz
 spikes/**/work/
 kernel/out/
-images/gpu-node/out/

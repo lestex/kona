@@ -4,8 +4,6 @@
 # usage: hack/capture-cli.sh > docs/cli-surface.md
 set -uo pipefail
 
-VMNET_HELPER=$(brew --prefix vmnet-helper 2>/dev/null)/libexec/vmnet-helper
-
 section() {
   printf '\n### `%s`\n\n```text\n' "$*"
   "$@" 2>&1
@@ -26,7 +24,3 @@ section container network create --help
 section container volume create --help
 section container machine create --help
 section container k8s create --help
-section krunkit --version
-section krunkit --help
-section "$VMNET_HELPER" --version
-section "$VMNET_HELPER" --help
