@@ -57,7 +57,8 @@ nodes`, `container`'s view (version, system status, VMs, networks, volumes),
 the host's macOS version and DNS configuration, and per node its `container
 logs`, IP/route/resolver config, `dmesg`, processes, disk usage and (on
 kubeadm nodes) the kubelet/containerd journal. From the control plane it adds
-nodes, pods, DaemonSets, events and `kubectl describe nodes`.
+nodes, pods, DaemonSets, events and `kubectl describe nodes`. With a
+kona-registry, its `container logs` are included too.
 
 It only reads. A step that fails records its error in its file instead of
 stopping the bundle. Secrets files and the kubeconfig are never included,
