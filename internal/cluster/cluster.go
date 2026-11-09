@@ -58,6 +58,9 @@ type Manager struct {
 	// KillMatching kills host processes by command line (nil: pgrep -f).
 	// Tests replace it: a fake cluster's name matches real clusters too.
 	KillMatching func(substr string) []int
+	// RelayRunning and HostDial are verify's host probes (nil: real ones).
+	RelayRunning func(c *state.Cluster, n state.Node) bool
+	HostDial     func(addr string) error
 	Log          io.Writer
 	// HostPrefixes returns host interface subnets (overridable in tests).
 	HostPrefixes func() []netip.Prefix
@@ -537,6 +540,9 @@ func (m *Manager) waitAPI(ctx context.Context, d distro.Distro, c *state.Cluster
 type NodeStatus struct {
 	Ready   bool
 	Version string
+	// BootID is the kubelet's report of the node's boot; it changes when
+	// the kubelet re-registers after a VM boot.
+	BootID string
 }
 
 // KubeNodes returns the Kubernetes status of every registered node.
@@ -561,6 +567,7 @@ func (m *Manager) KubeNodes(ctx context.Context, d distro.Distro, c *state.Clust
 				} `json:"conditions"`
 				NodeInfo struct {
 					KubeletVersion string `json:"kubeletVersion"`
+					BootID         string `json:"bootID"`
 				} `json:"nodeInfo"`
 			} `json:"status"`
 		} `json:"items"`
@@ -570,7 +577,7 @@ func (m *Manager) KubeNodes(ctx context.Context, d distro.Distro, c *state.Clust
 	}
 	res := map[string]NodeStatus{}
 	for _, it := range list.Items {
-		st := NodeStatus{Version: it.Status.NodeInfo.KubeletVersion}
+		st := NodeStatus{Version: it.Status.NodeInfo.KubeletVersion, BootID: it.Status.NodeInfo.BootID}
 		for _, cond := range it.Status.Conditions {
 			if cond.Type == "Ready" && cond.Status == "True" {
 				st.Ready = true
@@ -583,12 +590,26 @@ func (m *Manager) KubeNodes(ctx context.Context, d distro.Distro, c *state.Clust
 
 func (m *Manager) waitNodesReady(ctx context.Context, d distro.Distro, c *state.Cluster, names []string,
 	deadline time.Time, report bool) error {
+	return m.waitNodesFresh(ctx, d, c, names, nil, deadline, report)
+}
+
+// waitNodesFresh waits for names to be Ready. A node in rebooted counts only
+// once the kubelet reports the VM's current boot ID: a Node object keeps
+// Ready=True from before its VM stopped until the node controller notices.
+func (m *Manager) waitNodesFresh(ctx context.Context, d distro.Distro, c *state.Cluster, names []string,
+	rebooted map[string]bool, deadline time.Time, report bool) error {
+	boots := map[string]string{}
 	var notReady []string
 	for m.Now().Before(deadline) {
 		st, err := m.KubeNodes(ctx, d, c)
 		notReady = notReady[:0]
 		for _, n := range names {
-			if err != nil || !st[n].Ready {
+			if rebooted[n] && boots[n] == "" {
+				if node, ok := c.Node(n); ok {
+					boots[n], _ = m.bootID(ctx, c, node)
+				}
+			}
+			if err != nil || !st[n].Ready || (rebooted[n] && (boots[n] == "" || st[n].BootID != boots[n])) {
 				notReady = append(notReady, n)
 			}
 		}
