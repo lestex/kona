@@ -354,7 +354,7 @@ cpu1 handshake: 102s ago
 cpu1 -> internet: ok
 ```
 
-Sleep/wake: **not run yet** (deferred by the user; see [networking.md](networking.md#open-items-need-user-action-before-phase-1)).
+Sleep/wake: **not run yet** (deferred by the user; see [networking.md](networking.md)).
 
 
 ## Phase 1: `kona create cluster --workers 2` on Apple `container`

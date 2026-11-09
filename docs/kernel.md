@@ -12,7 +12,7 @@ plus a few link types.
 kona therefore does **not** maintain its own kernel config. It uses
 `kernel/base-arm64.config`, the exact running config extracted from
 `/proc/config.gz` of the default kernel, and merges a small fragment,
-[`kernel/kona.config`](../kernel/kona.config), onto it.
+[`kernel/kona.config`](https://github.com/lestex/kona/blob/main/kernel/kona.config), onto it.
 
 - Source: kernel.org `linux-6.18.35.tar.xz`, sha256-verified against
   `sha256sums.asc`. The version is pinned in `versions.env` (`KERNEL_VERSION`).

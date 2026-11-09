@@ -2,3 +2,5 @@
 /dist/
 spikes/**/work/
 kernel/out/
+.venv/
+/site/

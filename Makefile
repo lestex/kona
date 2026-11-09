@@ -5,7 +5,7 @@ SUMS    := $(shell grep -E '^[A-Z0-9_]+_SHA256[A-Z0-9_]*=' versions.env | paste 
 PKG     := github.com/lestex/kona/internal/version
 LDFLAGS := -s -w -X $(PKG).Version=$(VERSION) -X $(PKG).Commit=$(COMMIT) -X '$(PKG).matrix=$(MATRIX)' -X '$(PKG).checksums=$(SUMS)'
 
-.PHONY: build test lint fmt-check check snapshot changelog release-env clean
+.PHONY: build test lint fmt-check check snapshot changelog docs-serve docs-build release-env clean
 
 # The release build (.goreleaser.yaml) links the same matrix from these.
 export KONA_MATRIX := $(MATRIX)
@@ -53,10 +53,28 @@ changelog:
 	fi
 	@echo "wrote CHANGELOG.md"
 
+# The docs site: MkDocs Material, pinned in docs-requirements.txt, in a
+# local virtualenv. NO_MKDOCS_2_WARNING drops a banner about the upstream
+# framework's next major version, which says nothing about this build.
+VENV := .venv
+
+$(VENV): docs-requirements.txt
+	python3 -m venv $(VENV)
+	$(VENV)/bin/pip install --quiet --upgrade pip
+	$(VENV)/bin/pip install --quiet -r docs-requirements.txt
+	@touch $(VENV)
+
+docs-serve: $(VENV)
+	NO_MKDOCS_2_WARNING=true $(VENV)/bin/mkdocs serve
+
+# --strict, as CI builds it: a broken link fails the build.
+docs-build: $(VENV)
+	NO_MKDOCS_2_WARNING=true $(VENV)/bin/mkdocs build --strict
+
 # For CI: the release build's environment, as KEY=VALUE lines.
 release-env:
 	@echo "KONA_MATRIX=$(MATRIX)"
 	@echo "KONA_SUMS=$(SUMS)"
 
 clean:
-	rm -rf bin dist
+	rm -rf bin dist site
