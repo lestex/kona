@@ -12,8 +12,11 @@ import (
 
 func healthy() *execx.Fake {
 	return &execx.Fake{Responses: map[string]execx.FakeResponse{
-		"sw_vers -productVersion":    {Out: []byte("26.6.2\n")},
-		"container --version":        {Out: []byte("container CLI version 1.4.1 (build: release)\n")},
+		"sw_vers -productVersion": {Out: []byte("26.6.2\n")},
+		"container --version":     {Out: []byte("container CLI version 1.4.1 (build: release)\n")},
+		"container system status": {Out: []byte("status              running\npaths.installRoot   /opt/homebrew/Cellar/container/1.5.0/\n")},
+		"sh -c codesign -dv --verbose=2 \"$1\" 2>&1 sh /opt/homebrew/Cellar/container/1.5.0/libexec/container-plugins/container-runtime-linux/bin/container-runtime-linux": {
+			Out: []byte("Identifier=com.apple.container.container-runtime-linux\nSignature=adhoc\nTeamIdentifier=not set\n")},
 		"scutil --dns":               {Out: []byte("resolver #1\n  nameserver[0] : 8.8.8.8\n")},
 		"krunkit --version":          {Out: []byte("krunkit 1.3.2\n")},
 		"brew --prefix vmnet-helper": {Out: []byte("/opt/homebrew/opt/vmnet-helper\n")},
@@ -94,5 +97,19 @@ func TestCompare(t *testing.T) {
 		if got := compare(c.a, c.b); got != c.want {
 			t.Errorf("compare(%s,%s)=%d want %d", c.a, c.b, got, c.want)
 		}
+	}
+}
+
+func TestContainerBuildSigning(t *testing.T) {
+	f := healthy()
+	if r := find(newDoctor(f).Run(context.Background(), Options{}), "container-build"); r.Status != OK ||
+		!strings.Contains(r.Message, "ad-hoc signed (Homebrew build)") {
+		t.Fatalf("homebrew: %+v", r)
+	}
+	f.Responses["container system status"] = execx.FakeResponse{Out: []byte("paths.installRoot   /usr/local/\n")}
+	f.Responses["sh -c codesign -dv --verbose=2 \"$1\" 2>&1 sh /usr/local/libexec/container-plugins/container-runtime-linux/bin/container-runtime-linux"] =
+		execx.FakeResponse{Out: []byte("Signature size=9000\nTeamIdentifier=UPBK2H6LZM\n")}
+	if r := find(newDoctor(f).Run(context.Background(), Options{}), "container-build"); r.Message != "runtime signed by team UPBK2H6LZM" {
+		t.Fatalf("pkg: %+v", r)
 	}
 }

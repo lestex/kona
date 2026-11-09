@@ -862,6 +862,174 @@ kona-ok
 [kubeadm] kona-ok
 ```
 
-### 2.4 Cross-node pod-to-pod between GPU and CPU nodes: DEFERRED to Phase 3
+### 2.4 Cross-node pod-to-pod between GPU and CPU nodes: PASS (recorded as 3.5)
 
-GPU (krunkit) nodes don't exist before Phase 3. This part of the Phase 2 gate will be run and recorded there, over the WireGuard link described in [networking.md](networking.md).
+GPU (krunkit) nodes don't exist before Phase 3, so this was run there, over the WireGuard link described in [networking.md](networking.md). See [3.5](#35-gpucpu-pod-to-pod-gate-24-pass-both-gpu-link-modes).
+
+
+## Phase 3: GPU nodes and DRA
+
+All on the `kona` cluster: k3s v1.37.0+k3s1, Cilium 1.20.2, 1 control plane,
+1 worker, 1 krunkit GPU node (`--gpu-link relay`), Homebrew `container`
+1.5.0, krunkit 1.3.2, vmnet-helper 0.13.0, kona-venus-dra v0.2.0, Apple M3
+Pro (18 GiB), macOS 27.0.1. Captured 2026-10-13.
+
+### 3.1 GPU node joins with Venus, tainted and labelled: PASS
+
+```
+$ kona get nodes
+NAME                   ROLE            KIND        IP              VM        READY   VERSION        CLOCK SKEW
+kona-control-plane-1   control-plane   container   192.168.70.10   running   true    v1.37.0+k3s1   +0.03s
+kona-worker-1          worker          container   192.168.70.20   running   true    v1.37.0+k3s1   +0.03s
+kona-gpu-worker-1      gpu-worker      krunkit     192.168.71.10   running   true    v1.37.0+k3s1   +0.14s
+$ kubectl get node kona-gpu-worker-1 -L kona.dev/gpu -o wide
+NAME                STATUS   ROLES    AGE   VERSION        GPU
+kona-gpu-worker-1   Ready    <none>   14d   v1.37.0+k3s1   venus
+$ kubectl get node kona-gpu-worker-1 -o jsonpath={.spec.taints}
+[{"effect":"NoSchedule","key":"kona.dev/gpu","value":"true"}]
+$ kubectl get resourceslices
+NAME                                                       NODE                DRIVER                       POOL                AGE
+00000-venus.kona.example.invalid-kona-gpu-worker-1-j8g77   kona-gpu-worker-1   venus.kona.example.invalid   kona-gpu-worker-1   68s
+```
+
+The "Venus missing" path (the node joins untainted, labelled
+`kona.dev/gpu=unavailable`, with no DRA plugin) is covered by the unit test
+`TestGPUWithoutVenusIsUntainted` only. This Mac always has Venus.
+
+### 3.2 DRA claims (exclusive): PASS
+
+`hack/gate-dra.sh`: a claim lands only on the GPU node and `vulkaninfo` in
+the pod sees Venus; a second whole-GPU claim stays Pending; deleting the
+first unprepares it (CDI spec removed) and the second is allocated; no
+kubelet DRA errors.
+
+```
+## GPU node: kona-gpu-worker-1; other nodes: node/kona-control-plane-1 node/kona-worker-1 
+## 1+2. first claim: placement and vulkaninfo
+NAME STATUS NODE
+first Running kona-gpu-worker-1
+NAME              STATE                AGE
+first-gpu-fgsht   allocated,reserved   2s
+'DISPLAY' environment variable not set... skipping surface info
+error: XDG_RUNTIME_DIR is invalid or not set in the environment.
+	apiVersion         = 1.2.0
+	deviceName         = Virtio-GPU Venus (Apple M3 Pro)
+	driverName         = venus
+## CDI spec on kona-gpu-worker-1 while prepared
+total 4
+drwxr-xr-x.  2 root root  60 Oct 14 02:21 .
+drwxr-xr-x. 41 root root 980 Oct 14 02:20 ..
+-rw-r--r--.  1 root root 507 Oct 14 02:21 venus.kona.example.invalid-dcd55303-577f-4ee9-83ad-3b6a918c7936.json
+## 3. second claim on the single-device node
+NAME STATUS NODE
+second Pending <none>
+NAME               STATE                AGE
+first-gpu-fgsht    allocated,reserved   25s
+second-gpu-kbp74   pending              20s
+REASON             MESSAGE
+FailedScheduling   0/3 nodes are available: 3 cannot allocate all claims. preemption: 0/3 nodes are available: 3 Preemption is not helpful for scheduling.
+## 4. delete the first pod: claim is unprepared, then the second is allocated
+second is now: Running on kona-gpu-worker-1
+## CDI specs on kona-gpu-worker-1 after both claims are gone (expect none)
+total 0
+drwxr-xr-x.  2 root root  40 Oct 14 02:23 .
+drwxr-xr-x. 41 root root 980 Oct 14 02:20 ..
+## driver log (prepare/unprepare)
+"unprepared" logger="dra" requestID=6 method="/k8s.io.kubelet.pkg.apis.dra.v1.DRAPlugin/NodeUnprepareResources" claim="kona-gate-dra/first-gpu-fgsht" err=null
+"prepared" logger="dra" requestID=7 method="/k8s.io.kubelet.pkg.apis.dra.v1.DRAPlugin/NodePrepareResources" claim="kona-gate-dra/second-gpu-kbp74" cdi="venus.ko
+"unprepared" logger="dra" requestID=8 method="/k8s.io.kubelet.pkg.apis.dra.v1.DRAPlugin/NodeUnprepareResources" claim="kona-gate-dra/second-gpu-kbp74" err=null
+## kubelet (k3s-agent) DRA errors since the delete (expect none)
+kubelet log lines since the delete: 28
+(no DRA/CDI errors)
+```
+
+### 3.3 GPU sharing by memory capacity: PASS
+
+Three pods each claiming 8Gi of the 18Gi device: two run the compute test
+at the same time, the third stays Pending. A claim without an amount stays
+Pending while they run. Output in [gpu.md](gpu.md#sharing-the-gpu-by-memory).
+
+### 3.4 Vulkan compute and llama.cpp on the GPU: PASS
+
+`examples/vulkan-compute`:
+
+```
+device: Virtio-GPU Venus (Apple M3 Pro) (driver venus, Vulkan 1.2.0)
+PASS: 1048576 elements computed on the GPU and verified (16.34 ms)
+```
+
+`examples/llama-vulkan`: llama.cpp v0.6.0 (Vulkan backend) with TinyLlama
+1.1B Q4_K_M, claiming 4Gi of the GPU. `-ngl 99` offloads every layer to
+Venus; `-ngl 0` is the CPU-only comparison in the same pod (4 vCPUs):
+
+```
+## llama-bench, GPU (Vulkan on Venus)
+ggml_vulkan: Found 1 Vulkan devices:
+ggml_vulkan: 0 = Virtio-GPU Venus (Apple M3 Pro) (venus) | uma: 1 | fp16: 1 | bf16: 0 | fp4: 0 | warp size: 32 | shared memory: 32768 | int dot: 0 | matrix cores: none
+| model                          |       size |     params | backend    | ngl |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | --------------: | -------------------: |
+| llama 1B Q4_K - Medium         | 636.18 MiB |     1.10 B | Vulkan     |  99 |           pp128 |      1185.95 ± 18.68 |
+| llama 1B Q4_K - Medium         | 636.18 MiB |     1.10 B | Vulkan     |  99 |            tg32 |        109.61 ± 1.49 |
+## llama-bench, CPU only
+| model                          |       size |     params | backend    | ngl |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | --------------: | -------------------: |
+| llama 1B Q4_K - Medium         | 636.18 MiB |     1.10 B | Vulkan     |   0 |           pp128 |       588.52 ± 26.75 |
+| llama 1B Q4_K - Medium         | 636.18 MiB |     1.10 B | Vulkan     |   0 |            tg32 |         71.44 ± 1.03 |
+## completion on the GPU
+Q: What is Kubernetes, in one sentence? A: Kubernetes is a German word that means "to be in a hurry." It's a common expression in German, and it's often used to describe someone who is in a rush or is trying to get something done
+0.01.523.159 I common_perf_print: prompt eval time =      94.81 ms /    15 tokens (    6.32 ms per token,   158.20 tokens per second)
+0.01.523.160 I common_perf_print:        eval time =     575.23 ms /    47 runs   (   12.24 ms per token,    81.71 tokens per second)
+```
+
+The GPU is about 2x the guest's CPUs for prompt processing and 1.5x for
+generation. The answer is a 1.1B model's, not a correctness check.
+
+### 3.5 GPU↔CPU pod-to-pod (gate 2.4): PASS, both GPU link modes
+
+`hack/gate-pod2pod.sh` over WireGuard through the host relay (`kona`
+cluster, default `--gpu-link relay`):
+
+```
+$ hack/gate-pod2pod.sh kona-gpu-worker-1 kona-worker-1
+## kona-gpu-worker-1 -> kona-worker-1 pod IP 10.42.1.152 (ICMP)
+3 packets transmitted, 3 packets received, 0% packet loss
+round-trip min/avg/max = 1.412/2.578/4.037 ms
+## kona-gpu-worker-1 -> service server.kona-gate.svc (HTTP via ClusterIP)
+kona-ok
+$ hack/gate-pod2pod.sh kona-worker-1 kona-gpu-worker-1
+## kona-worker-1 -> kona-gpu-worker-1 pod IP 10.42.2.223 (ICMP)
+3 packets transmitted, 3 packets received, 0% packet loss
+round-trip min/avg/max = 1.888/2.199/2.456 ms
+## kona-worker-1 -> service server.kona-gate.svc (HTTP via ClusterIP)
+kona-ok
+```
+
+Through container's published-port forwarder instead (a separate
+`kona create cluster pub --workers 0 --gpu-workers 1 --gpu-link publish`,
+same host and container 1.5.0, deleted afterwards):
+
+```
+$ hack/gate-pod2pod.sh pub-gpu-worker-1 pub-control-plane-1
+## pub-gpu-worker-1 -> pub-control-plane-1 pod IP 10.42.0.6 (ICMP)
+3 packets transmitted, 3 packets received, 0% packet loss
+round-trip min/avg/max = 1.173/1.748/2.184 ms
+## pub-gpu-worker-1 -> service server.kona-gate.svc (HTTP via ClusterIP)
+kona-ok
+$ hack/gate-pod2pod.sh pub-control-plane-1 pub-gpu-worker-1
+## pub-control-plane-1 -> pub-gpu-worker-1 pod IP 10.42.1.4 (ICMP)
+3 packets transmitted, 3 packets received, 0% packet loss
+round-trip min/avg/max = 1.456/2.001/2.329 ms
+## pub-control-plane-1 -> service server.kona-gate.svc (HTTP via ClusterIP)
+kona-ok
+```
+
+### 3.6 Lifecycle with a GPU node: PASS
+
+Stop and start of the whole cluster and of the GPU node alone, with
+`kona verify cluster` before and after: [lifecycle.md](lifecycle.md).
+
+### 3.7 Host sleep: open
+
+See [failure-modes.md](failure-modes.md). Not re-tested since the test-isolation
+fix (`357961b`), which explained at least one GPU VM death that had looked
+like a sleep loss.
