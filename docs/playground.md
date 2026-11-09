@@ -223,7 +223,7 @@ spikes/03-net/wifi-toggle.sh      # WIFI_IF=en0 by default
 Observed so far: the bridges, static IPs and L2 paths are never affected. The
 GPU↔CPU tunnel was fine in one run and stalled up to ~40 s in another before
 keepalive traffic restored it. Sleep/wake is not tested yet; see
-[networking.md](networking.md#open-items-need-user-action-before-phase-1).
+[networking.md](networking.md).
 
 ## 4. Clean up
 
