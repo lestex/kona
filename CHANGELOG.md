@@ -4,7 +4,7 @@ Every release, newest first. Generated from the commit log by
 [git-cliff](https://git-cliff.org); run `make changelog` rather than
 editing this file by hand.
 
-## Unreleased
+## 0.1.0 - 2026-11-09
 
 - Init scaffold
 - Versions doc
@@ -108,3 +108,26 @@ editing this file by hand.
 - Ci on main only
 - Stop node keeps control plane quorum
 - Registry logs in support bundle
+- Changelog from commit log
+- Goreleaser release build and cask
+- Release workflow
+- Release build in ci
+- Release doc
+- Node image build args as make vars
+- Publish node images from ci
+- Node images in release doc
+- Kona kernel install
+- Only v tags are kona versions
+- Reproducible kernel build
+- Single-threaded pahole for reproducible btf
+- Pin the reproducible kernel
+- Build and publish the kernel in ci
+- Kernel release doc
+- Mkdocs site setup
+- Fix doc links for the site
+- Home and getting started pages
+- Clusters and troubleshooting guides
+- Cli reference and development page
+- Docs workflow
+- Readme
+- Cask homepage is the docs site
