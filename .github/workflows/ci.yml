@@ -15,7 +15,7 @@ concurrency:
 jobs:
   test:
     # kona targets Apple silicon on macOS 26 (Tahoe); unit tests use fakes,
-    # so no `container`, krunkit or nested virtualization is needed here.
+    # so no `container` or nested virtualization is needed here.
     runs-on: macos-26
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
