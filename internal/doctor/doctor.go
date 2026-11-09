@@ -195,8 +195,7 @@ func (d *Doctor) containerBuild(ctx context.Context, status string) (Result, boo
 
 func (d *Doctor) kernel(path string) Result {
 	r := Result{Name: "kernel"}
-	fix := "make -C kernel && mkdir -p \"$(dirname '" + path + "')\" && cp kernel/out/vmlinux-" +
-		version.Get("KERNEL_VERSION") + "-kona '" + path + "'  (or pass --kernel)"
+	fix := "kona kernel install  (or pass --kernel)"
 	if _, err := d.Stat(path); err != nil {
 		r.Status = Fail
 		r.Message = "kona guest kernel not found at " + path
