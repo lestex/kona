@@ -15,7 +15,7 @@ func newVerifyCmd(g *globals) *cobra.Command {
 	var timeout time.Duration
 	cluster := &cobra.Command{
 		Use:   "cluster [NAME]",
-		Short: "Check VMs, relays, API, nodes, system pods, DNS, clocks and GPUs; exit 1 on any failure",
+		Short: "Check VMs, API, nodes, system pods, DNS and clocks; exit 1 on any failure",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := DefaultClusterName

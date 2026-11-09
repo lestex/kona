@@ -20,13 +20,6 @@ const AdminKubeconfigPath = "/etc/rancher/k3s/k3s.yaml"
 // DataDir holds kine/SQLite (single server) or embedded etcd (HA).
 const DataDir = "/var/lib/rancher/k3s/server/db"
 
-// GPUTaint keeps ordinary pods off GPU workers.
-const GPUTaint = "kona.dev/gpu=true:NoSchedule"
-
-// AgentArgs returns the k3s agent command line for a node that is not an
-// Apple container VM (krunkit GPU workers run k3s from systemd).
-func AgentArgs(c *state.Cluster, n state.Node) ([]string, error) { return nodeArgs(c, n) }
-
 // SecretToken is the cluster join token key in Secrets.
 const SecretToken = "token"
 
@@ -113,10 +106,6 @@ func nodeArgs(c *state.Cluster, n state.Node) ([]string, error) {
 		return append(args, common...), nil
 	case state.RoleWorker:
 		return append([]string{"agent", "--server", join}, common...), nil
-	case state.RoleGPUWorker:
-		// Tainted from registration: nothing schedules here before kona has
-		// verified Venus (the taint is removed if Venus is unavailable).
-		return append([]string{"agent", "--server", join, "--node-taint", GPUTaint}, common...), nil
 	default:
 		return nil, fmt.Errorf("unknown role %q", n.Role)
 	}

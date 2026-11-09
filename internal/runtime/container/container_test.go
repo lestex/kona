@@ -16,12 +16,11 @@ func TestRunArgs(t *testing.T) {
 		Env:     map[string]string{"B": "2", "A": "1"},
 		Labels:  map[string]string{LabelCluster: "kona"},
 		Volumes: map[string]string{"db": "/var/lib/db"},
-		Publish: []string{"51820:51820/udp"},
 		Args:    []string{"agent", "--x"},
 	}), " ")
 	want := "run -d --progress none --name kona-worker-1 --cap-add ALL --masked-path NONE --read-only-path NONE --init --tmpfs /run " +
 		"--kernel /k --network kona-kona,mac=52:54:00:00:00:01,mtu=1500 --dns 8.8.8.8 --cpus 2 --memory 2G " +
-		"-e A=1 -e B=2 --label kona.cluster=kona -v db:/var/lib/db -p 51820:51820/udp img:1 agent --x"
+		"-e A=1 -e B=2 --label kona.cluster=kona -v db:/var/lib/db img:1 agent --x"
 	if got != want {
 		t.Fatalf("RunArgs:\n got %s\nwant %s", got, want)
 	}

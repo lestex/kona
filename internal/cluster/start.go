@@ -9,10 +9,9 @@ import (
 	"github.com/lestex/kona/internal/state"
 )
 
-// Start boots every stopped node of a cluster: `container` VMs after a host
-// reboot, krunkit GPU VMs that did not survive a reboot or host sleep. Node
-// configuration lives on the node disks (static IP, WireGuard, k3s env), so
-// the entrypoint and systemd units reapply it on boot.
+// Start boots every stopped node of a cluster, for example after a host
+// reboot. Node configuration lives in the VMs (static IP, k3s env), so the
+// entrypoint reapplies it on boot.
 func (m *Manager) Start(ctx context.Context, name string, wait time.Duration) error {
 	return m.StartNodes(ctx, name, nil, wait)
 }
@@ -22,6 +21,9 @@ func (m *Manager) Start(ctx context.Context, name string, wait time.Duration) er
 func (m *Manager) StartNodes(ctx context.Context, name string, names []string, wait time.Duration) error {
 	c, err := m.Store.Load(name)
 	if err != nil {
+		return err
+	}
+	if err := supported(c); err != nil {
 		return err
 	}
 	want, err := pickNodes(c, names)
@@ -44,38 +46,18 @@ func (m *Manager) StartNodes(ctx context.Context, name string, names []string, w
 			if (n.Role == state.RoleControlPlane) != controlPlanes || !want[n.Name] {
 				continue
 			}
-			switch n.Kind {
-			case state.KindContainer:
-				ct, ok := existing[n.Name]
-				if !ok {
-					return fmt.Errorf("node %s has no VM; recreate the cluster (kona delete cluster %s && kona create cluster %s)", n.Name, name, name)
-				}
-				if ct.Status.State == "running" {
-					continue
-				}
-				m.logf("• Starting %s", n.Name)
-				if err := m.Container.Start(ctx, n.Name); err != nil {
-					return err
-				}
-			case state.KindKrunkit:
-				if m.GPU == nil {
-					return fmt.Errorf("GPU node %s needs krunkit and vmnet-helper (run `kona doctor --gpu`)", n.Name)
-				}
-				kn := m.krunkitNode(c, n)
-				if m.GPU.Running(kn) {
-					continue
-				}
-				m.logf("• Starting GPU node %s", n.Name)
-				if err := m.GPU.Start(ctx, kn); err != nil {
-					return err
-				}
+			ct, ok := existing[n.Name]
+			if !ok {
+				return fmt.Errorf("node %s has no VM; recreate the cluster (kona delete cluster %s && kona create cluster %s)", n.Name, name, name)
+			}
+			if ct.Status.State == "running" {
+				continue
+			}
+			m.logf("• Starting %s", n.Name)
+			if err := m.Container.Start(ctx, n.Name); err != nil {
+				return err
 			}
 			rebooted[n.Name] = true
-		}
-	}
-	if len(c.GPUNodes()) > 0 {
-		if err := m.ensureRelays(c); err != nil {
-			return err
 		}
 	}
 	if len(rebooted) == 0 {
@@ -97,10 +79,10 @@ func (m *Manager) StartNodes(ctx context.Context, name string, names []string, w
 }
 
 // waitHealthy polls Verify until no check fails: a node turns Ready before
-// its CNI, DNS and DRA pods are back, and the cluster isn't usable until
+// its CNI and DNS pods are back, and the cluster isn't usable until
 // they are.
 func (m *Manager) waitHealthy(ctx context.Context, name string, deadline time.Time) error {
-	m.logf("• Waiting for system pods, DNS and GPUs")
+	m.logf("• Waiting for system pods and DNS")
 	var failed []string
 	for m.Now().Before(deadline) {
 		r, err := m.Verify(ctx, name)

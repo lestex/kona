@@ -22,15 +22,10 @@ func TestCiliumInstallArgs(t *testing.T) {
 	}
 }
 
-func TestCiliumMTUWithGPUNodes(t *testing.T) {
+func TestCiliumAutoMTU(t *testing.T) {
 	c := &state.Cluster{Name: "kona", Nodes: []state.Node{
 		{Name: "cp", Role: state.RoleControlPlane, IP: "192.168.70.10"}}}
 	if a := strings.Join(CiliumInstallArgs(c, "/kc", "x"), " "); strings.Contains(strings.ToLower(a), "mtu=") {
-		t.Fatalf("CPU-only cluster must keep auto MTU: %s", a)
-	}
-	c.Nodes = append(c.Nodes, state.Node{Name: "g", Role: state.RoleGPUWorker})
-	// Upper-case MTU is the chart key (values.yaml: "MTU: 0").
-	if a := strings.Join(CiliumInstallArgs(c, "/kc", "x"), " "); !strings.Contains(a, "--set MTU=1420") {
-		t.Fatalf("GPU cluster needs --set MTU=1420 (wg0's MTU): %s", a)
+		t.Fatalf("kona leaves Cilium's MTU on auto: %s", a)
 	}
 }

@@ -84,20 +84,3 @@ func TestCiliumDisablesFlannelAndKubeProxy(t *testing.T) {
 		t.Errorf("agent args mention flannel: %s", w)
 	}
 }
-
-func TestGPUWorkerTaintedAtRegistration(t *testing.T) {
-	c := cluster(1)
-	c.Nodes = append(c.Nodes, state.Node{Name: "kona-gpu-worker-1", Role: state.RoleGPUWorker, IP: "192.168.71.10"})
-	a, err := AgentArgs(c, c.Nodes[len(c.Nodes)-1])
-	if err != nil {
-		t.Fatal(err)
-	}
-	j := strings.Join(a, " ")
-	if !strings.Contains(j, "--node-taint kona.dev/gpu=true:NoSchedule") || !strings.Contains(j, "--node-ip 192.168.71.10") ||
-		!strings.Contains(j, "kona.dev/role=gpu-worker") {
-		t.Fatalf("gpu agent args: %s", j)
-	}
-	if w := args(t, c, "kona-worker-1"); strings.Contains(w, "node-taint") {
-		t.Fatalf("CPU worker tainted: %s", w)
-	}
-}
