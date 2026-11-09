@@ -10,4 +10,4 @@ import _ "embed"
 var VenusDRA []byte
 
 // VenusDRAImage is the driver image the manifest references.
-const VenusDRAImage = "ghcr.io/lestex/kona-venus-dra:v0.1.0"
+const VenusDRAImage = "ghcr.io/lestex/kona-venus-dra:v0.2.0"

@@ -45,7 +45,13 @@ func run(nodeName, cdiDir, kubeletDir string) error {
 	if err != nil {
 		return fmt.Errorf("%w (is %s present and the patched Mesa installed?)", err, driver.RenderNode)
 	}
-	klog.InfoS("found Venus GPU", "device", gpu.DeviceName, "vulkanApiVersion", gpu.APIVersion)
+	if out, err = exec.Command("vulkaninfo").Output(); err != nil {
+		return fmt.Errorf("vulkaninfo: %w", err)
+	}
+	if gpu.HeapBytes, err = driver.ParseVenusHeapBytes(string(out)); err != nil {
+		return err
+	}
+	klog.InfoS("found Venus GPU", "device", gpu.DeviceName, "vulkanApiVersion", gpu.APIVersion, "heapBytes", gpu.HeapBytes)
 
 	cfg, err := rest.InClusterConfig()
 	if err != nil {

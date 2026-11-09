@@ -41,8 +41,19 @@ func DefaultGPUImageName() string {
 }
 
 // RunDir is where a cluster's unix sockets live (short path).
-func RunDir(cluster string) string {
-	return filepath.Join("/tmp", fmt.Sprintf("kona-%d", os.Getuid()), cluster)
+func (m *Manager) RunDir(cluster string) string {
+	root := m.RunRoot
+	if root == "" {
+		root = filepath.Join("/tmp", fmt.Sprintf("kona-%d", os.Getuid()))
+	}
+	return filepath.Join(root, cluster)
+}
+
+func (m *Manager) killMatching(substr string) []int {
+	if m.KillMatching != nil {
+		return m.KillMatching(substr)
+	}
+	return krunkit.KillMatching(substr)
 }
 
 func (m *Manager) nodeDir(cluster, node string) string {
@@ -59,7 +70,7 @@ func (m *Manager) krunkitNode(c *state.Cluster, n state.Node) krunkit.Node {
 	last := subnet.Masked().Addr().As4()
 	last[3] = 254
 	return krunkit.Node{
-		Name: n.Name, Dir: m.nodeDir(c.Name, n.Name), RunDir: RunDir(c.Name),
+		Name: n.Name, Dir: m.nodeDir(c.Name, n.Name), RunDir: m.RunDir(c.Name),
 		MAC: n.MAC, CPUs: n.CPUs, MemoryMiB: mib,
 		Gateway: c.GPUNetwork.Gateway, SubnetEnd: netip.AddrFrom4(last).String(), Netmask: "255.255.255.0",
 	}

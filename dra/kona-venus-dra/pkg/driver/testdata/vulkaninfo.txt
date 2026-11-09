@@ -1,0 +1,22 @@
+GPU0:
+	deviceName        = Virtio-GPU Venus (Apple M3 Pro)
+	driverName                                           = venus
+VkPhysicalDeviceMemoryProperties:
+=================================
+memoryHeaps: count = 1
+	memoryHeaps[0]:
+		size   = 19327352832 (0x480000000) (18.00 GiB)
+		flags: count = 1
+			MEMORY_HEAP_DEVICE_LOCAL_BIT
+GPU1:
+	deviceName        = llvmpipe (LLVM 22.1.0, 128 bits)
+	driverName                                           = llvmpipe
+VkPhysicalDeviceMemoryProperties:
+=================================
+memoryHeaps: count = 1
+	memoryHeaps[0]:
+		size   = 4077170688 (0xf304b000) (3.80 GiB)
+		budget = 4077170688 (0xf304b000) (3.80 GiB)
+		usage  = 736890880 (0x2bec1000) (702.75 MiB)
+		flags: count = 1
+			MEMORY_HEAP_DEVICE_LOCAL_BIT

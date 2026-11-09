@@ -40,3 +40,58 @@
 | `driver` | constant | `venus` |
 | `deviceName` | `vulkaninfo --summary` → `deviceName` | `Virtio-GPU Venus (Apple M3 Pro)` |
 | `vulkanApiVersion` | `vulkaninfo --summary` → `apiVersion` | `1.2.0` (published as a semver `version` attribute) |
+
+## Sharing the GPU by memory
+
+A krunkit node has one Venus device, `gpu0`. Its ResourceSlice publishes a
+consumable `memory` capacity and `allowMultipleAllocations: true`
+(`DRAConsumableCapacity`, beta and on by default in Kubernetes 1.37):
+
+| Field | Value | Source |
+|-------|-------|--------|
+| `capacity.memory.value` | Venus device-local heap, rounded down to whole GiB (`18Gi` on an 18 GiB M3 Pro) | full `vulkaninfo` → `memoryHeaps[]` with `MEMORY_HEAP_DEVICE_LOCAL_BIT` |
+| `requestPolicy.default` | the whole capacity | so a claim with no amount is exclusive, as before |
+| `requestPolicy.validRange` | min `1Gi`, step `1Gi` | |
+
+Venus reports the host's unified memory as its heap, so the capacity is
+"what one app could allocate", not memory set aside for this VM. If the heap
+can't be read, the driver exits instead of publishing a device it can't
+account for.
+
+A claim asks for an amount through `capacity.requests` (see
+`examples/vulkan-compute/vulkan-shared.yaml`):
+
+```yaml
+exactly:
+  deviceClassName: kona-gpu
+  capacity:
+    requests:
+      memory: 8Gi
+```
+
+The scheduler places claims until the capacity is used up. The amount
+appears in the container as `KONA_VENUS_MEMORY` (bytes). It is **accounting,
+not isolation**: Venus doesn't limit what a pod allocates, so a pod can use
+more than it claimed. As a last check, the driver refuses to prepare a claim
+that would overcommit the device. Each claim's amount is recorded in its CDI
+spec, and specs from v0.1.0 (which have no amount) count as the whole device.
+
+Verified on the `kona` cluster (driver v0.2.0): three replicas each claiming
+8Gi of 18Gi. Two ran the compute test on the GPU at the same time and the
+third stayed Pending:
+
+```
+vulkan-shared-…-cqh68   0/1  Pending   <none>
+vulkan-shared-…-d8q4f   1/1  Running   kona-gpu-worker-1
+vulkan-shared-…-prm4t   1/1  Running   kona-gpu-worker-1
+…-d8q4f-gpu-4flmv: gpu0 consumed={"memory":"8Gi"} share=df25ce5c-…
+…-prm4t-gpu-sgm2k: gpu0 consumed={"memory":"8Gi"} share=20034176-…
+KONA_VENUS_MEMORY=8589934592
+PASS: 1048576 elements computed on the GPU and verified (9.80 ms)
+PASS: 1048576 elements computed on the GPU and verified (10.16 ms)
+FailedScheduling  0/3 nodes are available: 3 cannot allocate all claims.
+```
+
+While the two 8Gi pods ran, a claim with no amount (`examples/vulkaninfo.yaml`)
+stayed Pending. It ran once they were deleted. No CDI specs were left over,
+and `hack/gate-dra.sh` (exclusive claims) still passes.
