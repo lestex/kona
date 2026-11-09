@@ -24,8 +24,10 @@ flowchart LR
 
 - **Node IP** = the node's static address from the cluster /24
   (`internal/netplan`): control planes at `.10+`, workers at `.20+`, the
-  registry at `.200`. The node entrypoint makes it the primary `eth0`
-  address (finding 5). kona stores it in state, and it's identical across
+  registry at `.200`. The node entrypoint makes it `eth0`'s only IPv4
+  address and removes the one `container` assigned (finding 5): that one
+  comes from a rotating allocator over the whole subnet, so it can be
+  another node's static address. kona stores it in state, and it's identical across
   recreates. k3s: `--node-ip <ip> --advertise-address <ip> --flannel-iface eth0`.
   kubeadm: `--apiserver-advertise-address <ip>`.
 - **Node↔node**: direct L2 on the cluster's vmnet bridge, with no
@@ -117,6 +119,9 @@ kept because they explain the GPU design on the `gpu` branch.
    .6). There is no `--ip` flag. A secondary static address added in the guest
    (`ip addr add`) is reachable from peers on that network **and from the
    host**.
+   The allocator rotates over the whole subnet (`.2`–`.253`, apple/container
+   `AttachmentAllocator`), so over time it hands out kona's static
+   addresses too; that's why nodes drop `container`'s address (2026-11-08).
 6. **Default container MTU is 1280.** `--network <net>,mtu=1500` works.
    vmnet-helper networks are 1500.
 7. **Published ports work for UDP.** `container run -p 51821:51821/udp` is

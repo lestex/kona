@@ -3,8 +3,9 @@
 #
 # Environment (set by `kona create cluster`):
 #   KONA_NODE_IP     static node address with prefix, e.g. 192.168.70.10/24.
-#                    Added as a secondary on eth0 because `container` assigns
-#                    a different primary address on every run.
+#                    It becomes eth0's only IPv4 address: `container` assigns
+#                    a different one on every run, from anywhere in the
+#                    subnet, so it can be another node's static address.
 #   KONA_REQUIRE     space-separated kernel features to verify at boot.
 #   KONA_INIT        "systemd" (kubeadm image): exec /sbin/init as PID 1.
 #                    Otherwise the arguments are the k3s command line.
@@ -13,19 +14,19 @@ set -euo pipefail
 log() { echo "kona-node: $*" >&2; }
 
 if [ -n "${KONA_NODE_IP:-}" ]; then
-  if ! ip -4 addr show dev eth0 | grep -q " ${KONA_NODE_IP%/*}/"; then
-    # Make the static address the *primary* one: tools that take "the
-    # interface address" (flannel --iface, source address selection) must
-    # see the node IP, not `container`'s per-run allocation. The dynamic
-    # address is re-added as a secondary so `container`'s own port
-    # publishing (which targets it) keeps working.
-    dyn=$(ip -4 -o addr show dev eth0 | awk '{print $4}' | head -1)
-    gw=$(ip -4 route show default | awk '{print $3; exit}')
-    [ -n "$dyn" ] && ip addr del "$dyn" dev eth0
+  # Keep only kona's address. `container` allocates addresses with a
+  # rotating allocator over the whole subnet (.2-.253), so its per-run
+  # address can be another node's static IP; holding it would steal that
+  # node's traffic (seen: a worker given the control plane's .10 talked to
+  # itself instead of the API). kona publishes no ports, so nothing needs
+  # `container`'s address. Flushing also drops the routes, so the default
+  # route is put back with the node IP as source.
+  gw=$(ip -4 route show default | awk '{print $3; exit}')
+  if [ "$(ip -4 -o addr show dev eth0 | awk '{print $4}')" != "$KONA_NODE_IP" ]; then
+    ip -4 addr flush dev eth0
     ip addr add "$KONA_NODE_IP" dev eth0
-    [ -n "$dyn" ] && ip addr add "$dyn" dev eth0
-    [ -n "$gw" ] && ip route replace default via "$gw" dev eth0 src "${KONA_NODE_IP%/*}"
   fi
+  [ -n "$gw" ] && ip route replace default via "$gw" dev eth0 src "${KONA_NODE_IP%/*}"
   # Tell the rest of the subnet right away; stale ARP entries from a
   # previous node with this address would otherwise linger.
   arping -c 2 -U -I eth0 "${KONA_NODE_IP%/*}" >/dev/null 2>&1 || true
