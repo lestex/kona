@@ -228,6 +228,11 @@ func (m *Manager) Create(ctx context.Context, o CreateOptions) (err error) {
 	if err != nil {
 		return err
 	}
+	// Ready nodes come before CoreDNS and the CNI pods: wait, as start
+	// does, until verify passes.
+	if err := m.waitHealthy(ctx, c.Name, deadline); err != nil {
+		return err
+	}
 	c.Phase = state.PhaseReady
 	if err := m.Store.Save(c); err != nil {
 		return err

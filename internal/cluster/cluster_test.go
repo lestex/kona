@@ -654,3 +654,30 @@ func TestStartReportsUnhealthyCluster(t *testing.T) {
 		t.Fatalf("want verify failure, got %v", err)
 	}
 }
+
+// Nodes turn Ready before CoreDNS and the CNI; create waits like start.
+func TestCreateWaitsForHealthyCluster(t *testing.T) {
+	m, s, log, o := setup(t)
+	s.unhealthy = 3 // a DaemonSet stays not ready for 3 polls
+	if err := m.Create(context.Background(), o); err != nil {
+		t.Fatalf("Create: %v\n%s", err, log)
+	}
+	if s.unhealthy >= 0 {
+		t.Fatalf("Create returned before the DaemonSets were ready (%d polls left)", s.unhealthy)
+	}
+	if !strings.Contains(log.String(), "is healthy") {
+		t.Fatalf("no health wait in the log:\n%s", log)
+	}
+}
+
+func TestCreateFailsWhenSystemPodsCrash(t *testing.T) {
+	m, s, _, o := setup(t)
+	s.crashPod = true
+	err := m.Create(context.Background(), o)
+	if err == nil || !strings.Contains(err.Error(), "CrashLoopBackOff") {
+		t.Fatalf("want a health failure, got %v", err)
+	}
+	if len(s.containers) != 0 {
+		t.Fatalf("not rolled back: %v", s.containers)
+	}
+}
