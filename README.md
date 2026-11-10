@@ -1,5 +1,7 @@
 # kona
 
+[![ci](https://github.com/lestex/kona/actions/workflows/ci.yml/badge.svg)](https://github.com/lestex/kona/actions/workflows/ci.yml)
+
 Kubernetes on Apple silicon, with one lightweight VM per node.
 
 kona creates Kubernetes clusters on a Mac from
@@ -7,9 +9,7 @@ kona creates Kubernetes clusters on a Mac from
 its own Linux VM with its own kernel, address and disk, on a private
 network the Mac reaches directly.
 
-[![ci](https://github.com/lestex/kona/actions/workflows/ci.yml/badge.svg)](https://github.com/lestex/kona/actions/workflows/ci.yml)
-
-**Documentation: [lestex.github.io/kona](https://lestex.github.io/kona/)**
+**Documentation: [alarin.dev/kona](https://alarin.dev/kona/)**
 
 ## Install
 
@@ -34,8 +34,8 @@ kona stop cluster && kona start cluster
 kona delete cluster
 ```
 
-See the [quick start](https://lestex.github.io/kona/getting-started/quick-start/)
-and the [command reference](https://lestex.github.io/kona/reference/cli/).
+See the [quick start](https://alarin.dev/kona/getting-started/quick-start/)
+and the [command reference](https://alarin.dev/kona/reference/cli/).
 
 ## Build
 
@@ -44,5 +44,5 @@ make build    # bin/kona
 make check    # gofmt, vet, tests
 ```
 
-[Building and testing](https://lestex.github.io/kona/development/) covers
+[Building and testing](https://alarin.dev/kona/development/) covers
 the node images, the guest kernel and the docs site.
