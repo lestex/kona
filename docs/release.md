@@ -56,10 +56,19 @@ The cask:
 
 The tap is a separate repository, which the workflow's `GITHUB_TOKEN`
 can't write to. The workflow needs a PAT with `contents:write` on the tap,
-stored in this repository as the `HOMEBREW_TAP_TOKEN` secret. Without it,
-the rest of the release still runs and only the cask step fails. In that
-case, add the secret and re-run the workflow from the same tag rather than
-moving the tag.
+stored in this repository as the `HOMEBREW_TAP_TOKEN` secret: a
+fine-grained token with **Contents: Read and write** on
+`lestex/homebrew-tap`. Without it, or with a token that can only read the
+tap, the GitHub release is still published and only the cask push fails
+with `403 Resource not accessible by personal access token`. In that case,
+fix the secret and re-run the workflow from the same tag rather than moving
+the tag. `replace_existing_artifacts` lets the re-run replace the archive
+and checksums it uploaded the first time.
+
+Tags made before `replace_existing_artifacts` was added (v0.1.0) carry
+the old config, so a re-run of them fails with `422 already_exists` on the
+first upload. For those, delete the release's assets
+(`gh release delete-asset`) before re-running.
 
 A `-rc` or `-beta` tag becomes a GitHub pre-release, and its cask is not
 uploaded (`skip_upload: auto`).
