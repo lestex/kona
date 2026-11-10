@@ -1,5 +1,5 @@
 # Builds the docs site on every docs change and publishes it to GitHub Pages
-# (https://lestex.github.io/kona/) from a v* tag only: readers run the
+# (https://alarin.dev/kona/) from a v* tag only: readers run the
 # released binary, so main would document behavior they don't have yet.
 # Pages must be set to "GitHub Actions" in Settings -> Pages.
 name: docs
