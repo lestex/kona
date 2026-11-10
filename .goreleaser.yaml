@@ -113,6 +113,10 @@ changelog:
 release:
   # A -rc or -beta tag lands as a pre-release without anyone ticking a box.
   prerelease: auto
+  # A re-run from the same tag (after a failed cask push, say) replaces the
+  # archive and checksums it uploaded before, instead of failing on
+  # "already_exists" before it reaches the cask.
+  replace_existing_artifacts: true
   footer: |
     ---
 
