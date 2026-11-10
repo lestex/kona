@@ -1,6 +1,6 @@
 site_name: kona
 site_description: Kubernetes on Apple silicon, one Apple container VM per node.
-site_url: https://lestex.github.io/kona/
+site_url: https://alarin.dev/kona/
 repo_url: https://github.com/lestex/kona
 repo_name: lestex/kona
 edit_uri: edit/main/docs/
