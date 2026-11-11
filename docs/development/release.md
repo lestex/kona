@@ -1,5 +1,9 @@
-# Releasing kona
-
+---
+title: "Releasing kona"
+linkTitle: "Releasing"
+weight: 2
+aliases: ["/release/"]
+---
 The tag is the version: nothing is committed anywhere to forget to bump.
 
 ```sh

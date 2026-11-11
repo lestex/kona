@@ -1,5 +1,9 @@
-# Cluster lifecycle: stop, start, verify
-
+---
+title: "Cluster lifecycle: stop, start, verify"
+linkTitle: "Stop, start, verify"
+weight: 3
+aliases: ["/lifecycle/"]
+---
 | Command | What it does |
 |---|---|
 | `kona stop cluster [NAME]` | Stops every node and keeps VMs, disks and state. Order: workers, then control planes, so agents never outlive the API. `container` nodes get `container stop --time 30`, so init shuts k3s/kubelet down cleanly. |

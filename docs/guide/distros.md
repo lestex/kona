@@ -1,5 +1,9 @@
-# Distros: k3s (default) vs kubeadm
-
+---
+title: "Distros: k3s (default) vs kubeadm"
+linkTitle: "k3s or kubeadm"
+weight: 2
+aliases: ["/distros/"]
+---
 `kona create cluster --distro k3s|kubeadm`. Both run on the same kernel, the
 same networking, and the same kona node lifecycle. They differ in what runs
 inside the node VM.
@@ -9,7 +13,7 @@ inside the node VM.
 | Node image | Fedora 44 + one `k3s` binary (containerd, runc, flannel, CNI plugins, kubectl bundled) + air-gap system images | Fedora 44 + systemd + containerd + kubelet/kubeadm/kubectl |
 | PID 1 in the node | `container`'s init (`--init`), then `kona-node` → `k3s` | systemd |
 | Kubernetes | v1.37.0+k3s1 | v1.37.1 |
-| Create time, 1 CP + 2 workers | **12.7 s** (measured on 1.37, [gates.md](gates.md)) | **49 s** (measured on 1.37; includes pulling control-plane images and flannel) |
+| Create time, 1 CP + 2 workers | **12.7 s** (measured on 1.37, [gates.md](../design/gates.md)) | **49 s** (measured on 1.37; includes pulling control-plane images and flannel) |
 | Datastore | single server: SQLite (kine) on the control plane's block volume. HA (`--control-planes 3`): embedded etcd on that volume | etcd static pod, data at `/var/lib/etcd/data` on the block volume. `etcdctl check perf`: PASS, 150 writes/s, slowest request 26 ms (etcd 3.7.0) |
 | Bundled add-ons | CoreDNS, local-path-provisioner, metrics-server, ServiceLB (traefik disabled by kona), flannel | CoreDNS and kube-proxy; kona applies flannel v0.28.9 (embedded manifest) |
 | Fidelity to upstream | Upstream Kubernetes, packaged differently (k3s flags, kine, single process) | Closest to how production clusters are built (static pods, kubeadm config, separate components) |

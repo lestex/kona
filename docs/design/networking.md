@@ -1,5 +1,9 @@
-# Networking design
-
+---
+title: "Networking design"
+linkTitle: "Networking"
+weight: 1
+aliases: ["/networking/"]
+---
 Status: **every node is an Apple `container` VM on one `container` network
 per cluster.** Nodes, the host and the API server reach each other directly
 on that network: no tunnel, no NAT and no published ports. GPU nodes
@@ -81,7 +85,7 @@ Cilium (v1.20.2) is installed from the host by the pinned Cilium CLI
 Install order: control plane → API ready → Cilium → remaining nodes → all
 Ready → `cilium status --wait`. Nodes can't become Ready before the CNI runs.
 
-Node requirements Cilium surfaced (details in [failure-modes.md](failure-modes.md)):
+Node requirements Cilium surfaced (details in [failure-modes.md](../reference/failure-modes.md)):
 shared mount propagation for `/` and `/sys/fs/bpf` inside node VMs, and
 `CONFIG_INET_DIAG` + `CONFIG_INET_UDP_DIAG` + `CONFIG_INET_DIAG_DESTROY` in
 the guest kernel.
@@ -130,7 +134,7 @@ kept because they explain the GPU design on the `gpu` branch.
    the source as its own gateway (`192.168.66.1:<port>`), so it is NATed.
    On container 1.7.1 (macOS 27.2, 2026-11-08) TCP published ports work too,
    whether or not the runtime's macOS Local Network rule is allowed
-   ([failure-modes.md](failure-modes.md)).
+   ([failure-modes.md](../reference/failure-modes.md)).
 8. **The vmnet gateway DNS forwarder can be broken.** On this host
    `192.168.64.1:53` refuses queries while `8.8.8.8` works. kona always passes
    the host's first IPv4 resolver explicitly (`--dns`, cloud-init

@@ -1,5 +1,8 @@
-# Command line
-
+---
+title: "Command line"
+linkTitle: "Command line"
+weight: 1
+---
 Every command that acts on a cluster takes it as `[NAME]` or `--name NAME`,
 defaulting to `kona`. `kona <command> --help` prints the same flags as
 below.
@@ -59,7 +62,7 @@ Start a cluster's stopped nodes, control planes first, and wait until
 ### `kona verify cluster [NAME]`
 
 Read-only health checks; exits 1 if any fails. See
-[Checks](../lifecycle.md#checks).
+[Checks](../guide/lifecycle.md#checks).
 
 | Flag | Default | |
 |---|---|---|
@@ -103,7 +106,7 @@ Open a shell on a node, or run a command there.
 
 Push images from the Mac's `container` image store into the cluster's
 registry; pods pull them by their usual names. See
-[Loading images](../registry.md).
+[Loading images](../guide/registry.md).
 
 ## Host
 

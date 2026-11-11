@@ -1,5 +1,8 @@
-# Clusters
-
+---
+title: "Clusters"
+linkTitle: "Clusters"
+weight: 1
+---
 ```sh
 kona create cluster [NAME] [flags]
 ```
@@ -33,7 +36,7 @@ kona add node [--name NAME] [--cpus 4] [--memory 4G]
 `--distro k3s` (the default) or `--distro kubeadm`. k3s starts in seconds
 and uses less memory. kubeadm builds the cluster the way production
 clusters are built, with static pods, a separate etcd and upstream
-components. [k3s or kubeadm](../distros.md) compares them.
+components. [k3s or kubeadm](distros.md) compares them.
 
 ## Network plugin
 
@@ -45,7 +48,7 @@ kona create cluster --cni cilium
 ```
 
 Cilium needs the tc/eBPF datapath that `container`'s default kernel lacks,
-which is the main reason kona boots its own [guest kernel](../kernel.md).
+which is the main reason kona boots its own [guest kernel](../design/kernel.md).
 
 ## High availability
 
@@ -72,10 +75,10 @@ Each cluster gets its own `container` network: the first free `/24` from
 |---|---|
 | `.10`, `.11`, … | control planes |
 | `.20`, `.21`, … | workers |
-| `.200` | the cluster's image registry, once you [load an image](../registry.md) |
+| `.200` | the cluster's image registry, once you [load an image](registry.md) |
 
 Nodes keep their addresses across stop and start. The Mac reaches all of
-them directly. [Networking](../networking.md) explains the design.
+them directly. [Networking](../design/networking.md) explains the design.
 
 ## DNS
 

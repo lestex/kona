@@ -1,5 +1,8 @@
-# Troubleshooting
-
+---
+title: "Troubleshooting"
+linkTitle: "Troubleshooting"
+weight: 5
+---
 ## Start with the checks
 
 ```sh
@@ -40,7 +43,7 @@ removes them.
 with `container system stop && container system start`, then
 `kona start cluster`.
 
-[Failure modes](../failure-modes.md) lists every problem found while
+[Failure modes](../reference/failure-modes.md) lists every problem found while
 building kona, with its root cause.
 
 ## A shell on a node
