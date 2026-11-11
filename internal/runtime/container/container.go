@@ -1,5 +1,5 @@
 // Package container drives Apple's `container` CLI. Flags used here are
-// checked against docs/cli-surface.md.
+// checked against docs/design/cli-surface.md.
 package container
 
 import (

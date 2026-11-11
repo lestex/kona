@@ -15,7 +15,7 @@ func CiliumVersion() string { return strings.TrimPrefix(version.Get("CILIUM_VERS
 // CiliumInstallArgs returns `cilium install` arguments for c.
 //
 // Datapath: kube-proxy replacement with VXLAN tunneling, which keeps pod
-// routing independent of the underlay (docs/networking.md).
+// routing independent of the underlay (docs/design/networking.md).
 // The API server is addressed directly (k8sServiceHost) because there is
 // no kube-proxy to program the kubernetes Service.
 //

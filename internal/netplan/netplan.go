@@ -3,7 +3,7 @@
 // `container` hands out a different address on every run, from anywhere in
 // the subnet, so kona assigns each node a static address from a fixed
 // layout inside the cluster's /24, and the node entrypoint removes
-// `container`'s one (see docs/networking.md):
+// `container`'s one (see docs/design/networking.md):
 //
 //	.1        gateway (host)
 //	.10-.19   control planes

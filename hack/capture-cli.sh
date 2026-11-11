@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Capture the CLI surface of the host tools kona drives, verbatim, so flag
 # usage in code can be checked against observed behavior.
-# usage: hack/capture-cli.sh > docs/cli-surface.md
+# usage: hack/capture-cli.sh > docs/design/cli-surface.md
 set -uo pipefail
 
 section() {

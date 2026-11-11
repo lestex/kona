@@ -1,5 +1,5 @@
 // Package k3s bootstraps clusters with k3s (the default distro: one static
-// binary, fast boot, small footprint; see docs/distros.md).
+// binary, fast boot, small footprint; see docs/guide/distros.md).
 package k3s
 
 import (

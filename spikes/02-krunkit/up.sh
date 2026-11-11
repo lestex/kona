@@ -67,7 +67,7 @@ hdiutil makehybrid -quiet -iso -joliet -default-volume-name cidata -o "$vm/seed.
 
 # Network: dedicated vmnet shared network for krunkit nodes. It cannot be
 # the same subnet as the `container` network (vmnet refuses), see
-# docs/networking.md.
+# docs/design/networking.md.
 sock=$run/$name.sock
 rm -f "$sock"
 "$helper" --socket "$sock" --interface-id "$(uuidgen)" \

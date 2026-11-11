@@ -28,7 +28,7 @@ done < <(grep -E '^CONFIG_[A-Z0-9_]+=' /kernel/kona.config)
 
 # Reproducible: the same source, config and toolchain image give the same
 # Image on any machine, so CI can publish the kernel versions.env pins
-# (docs/kernel.md). These replace the build host, user and time the kernel
+# (docs/design/kernel.md). These replace the build host, user and time the kernel
 # would otherwise stamp into `uname -v` and /proc/version.
 export KBUILD_BUILD_TIMESTAMP="1970-01-01 00:00:00 UTC" \
        KBUILD_BUILD_USER=kona KBUILD_BUILD_HOST=kona KBUILD_BUILD_VERSION=1

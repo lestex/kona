@@ -184,7 +184,7 @@ func (d *Doctor) containerBuild(ctx context.Context, status string) (Result, boo
 			r.Message = "runtime signed by team " + team
 		case adhoc:
 			r.Message = "ad-hoc signed (Homebrew build): its macOS Local Network rule is per version; " +
-				"kona publishes no ports, so it doesn't depend on it (docs/failure-modes.md)"
+				"kona publishes no ports, so it doesn't depend on it (docs/reference/failure-modes.md)"
 		default:
 			r.Message = "runtime signature unknown: " + path
 		}
