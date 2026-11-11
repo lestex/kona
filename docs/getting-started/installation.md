@@ -1,46 +1,56 @@
-# Installation
-
+---
+title: "Installation"
+linkTitle: "Installation"
+weight: 1
+---
 ## 1. Install kona
 
-=== "Homebrew"
+{{< tabs >}}
+{{< tab name="Homebrew" >}}
 
-    ```sh
-    brew install lestex/tap/kona
-    ```
+```sh
+brew install lestex/tap/kona
+```
 
-    The cask also installs Apple `container` from homebrew-core.
+The cask also installs Apple `container` from homebrew-core.
 
-    !!! note "Use the full name"
-        homebrew-core has an unrelated `kona` formula (the K programming
-        language). A bare `brew install kona` installs that one, so always
-        use `lestex/tap/kona`.
+{{< callout type="warning" >}}
+**Use the full name.** homebrew-core has an unrelated `kona` formula (the
+K programming language). A bare `brew install kona` installs that one, so
+always use `lestex/tap/kona`.
+{{< /callout >}}
 
-=== "Release archive"
+{{< /tab >}}
+{{< tab name="Release archive" >}}
 
-    Download `kona_<version>_darwin_arm64.tar.gz` from the
-    [releases page](https://github.com/lestex/kona/releases), check it
-    against `checksums.txt`, and put `kona` on your `PATH`:
+Download `kona_<version>_darwin_arm64.tar.gz` from the
+[releases page](https://github.com/lestex/kona/releases), check it
+against `checksums.txt`, and put `kona` on your `PATH`:
 
-    ```sh
-    tar xzf kona_*_darwin_arm64.tar.gz kona
-    xattr -dr com.apple.quarantine kona   # the binary is not notarized
-    sudo mv kona /usr/local/bin/
-    brew install container
-    ```
+```sh
+tar xzf kona_*_darwin_arm64.tar.gz kona
+xattr -dr com.apple.quarantine kona   # the binary is not notarized
+sudo mv kona /usr/local/bin/
+brew install container
+```
 
-=== "From source"
+{{< /tab >}}
+{{< tab name="From source" >}}
 
-    Requires Go (the version in `go.mod`):
+Requires Go (the version in `go.mod`):
 
-    ```sh
-    git clone https://github.com/lestex/kona && cd kona
-    make build            # bin/kona, with the pinned versions linked in
-    brew install container
-    ```
+```sh
+git clone https://github.com/lestex/kona && cd kona
+make build            # bin/kona, with the pinned versions linked in
+brew install container
+```
 
-    Build with `make`, not a plain `go build`: the Makefile links in the
-    pinned component versions from `versions.env`, and kona needs them to
-    pick its node image and kernel.
+Build with `make`, not a plain `go build`: the Makefile links in the
+pinned component versions from `versions.env`, and kona needs them to
+pick its node image and kernel.
+
+{{< /tab >}}
+{{< /tabs >}}
 
 ## 2. Start Apple `container`
 
@@ -62,7 +72,7 @@ one. It adds what Kubernetes networking needs, such as the tc/eBPF
 datapath Cilium uses. `kona kernel install` downloads the exact build this
 kona version pins, checks its sha256, and puts it in
 `~/Library/Application Support/kona/kernels/`. Details are in
-[Guest kernel](../kernel.md).
+[Guest kernel](../design/kernel.md).
 
 ## 4. Check the Mac
 

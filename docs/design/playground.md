@@ -1,5 +1,9 @@
-# kona playground: reproduce Phase 0 by hand
-
+---
+title: "kona playground: reproduce Phase 0 by hand"
+linkTitle: "Phase 0 playground"
+weight: 5
+aliases: ["/playground/"]
+---
 > The krunkit and GPU parts of Phase 0 fed GPU node support, which was
 > removed on 2026-11-08 (see the `gpu` branch). The spikes still run as
 > records of those experiments.

@@ -53,23 +53,15 @@ changelog:
 	fi
 	@echo "wrote CHANGELOG.md"
 
-# The docs site: MkDocs Material, pinned in docs-requirements.txt, in a
-# local virtualenv. NO_MKDOCS_2_WARNING drops a banner about the upstream
-# framework's next major version, which says nothing about this build.
-VENV := .venv
+# The docs site: Hugo with the Hextra theme (website/, content in docs/).
+# Needs `hugo` (brew install hugo); the theme is a Hugo module pinned in
+# website/go.mod. CI pins the Hugo version in .github/workflows/docs.yml.
+docs-serve:
+	cd website && hugo server
 
-$(VENV): docs-requirements.txt
-	python3 -m venv $(VENV)
-	$(VENV)/bin/pip install --quiet --upgrade pip
-	$(VENV)/bin/pip install --quiet -r docs-requirements.txt
-	@touch $(VENV)
-
-docs-serve: $(VENV)
-	NO_MKDOCS_2_WARNING=true $(VENV)/bin/mkdocs serve
-
-# --strict, as CI builds it: a broken link fails the build.
-docs-build: $(VENV)
-	NO_MKDOCS_2_WARNING=true $(VENV)/bin/mkdocs build --strict
+# As CI builds it: a broken page link or any warning fails the build.
+docs-build:
+	cd website && hugo --gc --minify --panicOnWarning
 
 # For CI: the release build's environment, as KEY=VALUE lines.
 release-env:
@@ -77,4 +69,4 @@ release-env:
 	@echo "KONA_SUMS=$(SUMS)"
 
 clean:
-	rm -rf bin dist site
+	rm -rf bin dist website/public website/resources

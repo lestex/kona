@@ -221,7 +221,7 @@ func (m *Manager) ensureRegistry(ctx context.Context, c *state.Cluster) error {
 		m.logf("• Starting %s (%s)", r.Name, r.IP)
 		// `container` has no static IP option and its address can be a
 		// node's static IP, so the registry swaps it for kona's address, as
-		// node entrypoints do (docs/networking.md).
+		// node entrypoints do (docs/design/networking.md).
 		if err := m.Container.Run(ctx, container.RunSpec{
 			Name: r.Name, Image: RegistryImage(), Network: c.Network.Name, MAC: r.MAC, MTU: nodeMTU,
 			CPUs: 1, Memory: "512M", Labels: labels, Volumes: map[string]string{r.Volume: registryDataDir},

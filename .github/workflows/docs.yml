@@ -13,14 +13,12 @@ on:
     # publishes.
     paths:
       - docs/**
-      - mkdocs.yml
-      - docs-requirements.txt
+      - website/**
       - .github/workflows/docs.yml
   pull_request:
     paths:
       - docs/**
-      - mkdocs.yml
-      - docs-requirements.txt
+      - website/**
       - .github/workflows/docs.yml
   # Redeploy a release's docs without moving the tag: run it on the tag ref.
   workflow_dispatch:
@@ -40,24 +38,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.13"
-          cache: pip
-          cache-dependency-path: docs-requirements.txt
+          # enableGitInfo: "last updated" dates come from the history.
+          fetch-depth: 0
 
-      - run: pip install -r docs-requirements.txt
+      # Hugo fetches the Hextra theme as a Go module (website/go.mod).
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: website/go.mod
+          cache-dependency-path: website/go.sum
 
-      # --strict: a broken internal link fails the build instead of becoming
-      # a 404 someone finds later.
-      - run: mkdocs build --strict
+      # Pinned, and checked against the checksums Hugo publishes.
+      - name: Install Hugo
+        run: |
+          base=https://github.com/gohugoio/hugo/releases/download/v${HUGO_VERSION}
+          tgz=hugo_extended_${HUGO_VERSION}_linux-amd64.tar.gz
+          curl -fsSLO "$base/$tgz"
+          echo "${HUGO_SHA256}  $tgz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/hugo" && tar -xzf "$tgz" -C "$RUNNER_TEMP/hugo" hugo
+          echo "$RUNNER_TEMP/hugo" >> "$GITHUB_PATH"
         env:
-          NO_MKDOCS_2_WARNING: "true"
+          HUGO_VERSION: 0.169.0
+          HUGO_SHA256: c41672a0725d307758a132bc94a962e59760eb33f9ba08c991b81f9881d6fa7d
+
+      # A broken page link (website/layouts/_markup/render-link.html) or any
+      # warning fails the build instead of becoming a 404 someone finds later.
+      - run: make docs-build
 
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: site
+          path: website/public
 
   deploy:
     needs: build

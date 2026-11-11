@@ -1,6 +1,10 @@
-# Failure modes
-
-Every entry here was hit in a real run (see [gates.md](gates.md)) or is
+---
+title: "Failure modes"
+linkTitle: "Failure modes"
+weight: 2
+aliases: ["/failure-modes/"]
+---
+Every entry here was hit in a real run (see [gates.md](../design/gates.md)) or is
 required by the brief. Each lists how it shows up and what kona does about it.
 
 ## Host and tooling
@@ -28,7 +32,7 @@ required by the brief. Each lists how it shows up and what kona does about it.
 | Default container MTU 1280 | Fragmentation or drops for overlay traffic | Nodes run with `mtu=1500`. |
 | vmnet passes TSO super-frames to a VM unsegmented ([details](#vmnet-tso-super-frames)) | Uploads of more than ~256 KiB from another `container` VM to a NodePort stall until timeout. Downloads, and uploads from the macOS host or from pods, work | Not handled. It is a vmnet/`container` bug, and kona adds no proxy around it. Reproduce with `hack/repro-vmnet-tso.sh`. |
 | Guest clock drift after host sleep | Skewed timestamps and TLS/token errors | chrony runs with `makestep 1 -1`. `kona get nodes` shows skew per node: after a real overnight sleep/wake cycle, skew was +0.06 s to +0.20 s. |
-| Host reboot, or `container` services restart | All `container` VMs stop | `kona start cluster` restarts control planes first, then workers, and waits until `kona verify cluster` passes ([lifecycle.md](lifecycle.md)). The entrypoint reapplies each node's static IP. |
+| Host reboot, or `container` services restart | All `container` VMs stop | `kona start cluster` restarts control planes first, then workers, and waits until `kona verify cluster` passes ([lifecycle.md](../guide/lifecycle.md)). The entrypoint reapplies each node's static IP. |
 
 ## Lifecycle
 
@@ -36,7 +40,7 @@ required by the brief. Each lists how it shows up and what kona does about it.
 |---|---|
 | Partial `create` failure | Rolls back by default: VMs, volumes, network, kubeconfig and state are removed (verified: no orphans). `--retain` keeps everything flagged `failed`, and re-running `create` resumes it. |
 | Orphans (resources labeled `kona.cluster` with no state) | `kona get clusters` flags them. `kona delete cluster <name>` and `--all` delete from labels, so this works without state. |
-| Wi-Fi change | Node↔node and host↔node paths are unaffected ([networking.md](networking.md)). |
+| Wi-Fi change | Node↔node and host↔node paths are unaffected ([networking.md](../design/networking.md)). |
 | Cluster created by an older kona with GPU nodes | `start`, `stop`, `add node` and `verify` refuse it and point at the `gpu` branch. `kona delete cluster` removes its `container` parts and warns about the krunkit VM. |
 
 ## vmnet TSO super-frames

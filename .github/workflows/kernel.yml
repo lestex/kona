@@ -61,7 +61,7 @@ jobs:
           ver=$(make -s -C kernel print-version)
           gh release create "$tag" --target "$GITHUB_SHA" --latest=false \
             --title "kona kernel $ver ($tag)" \
-            --notes "The kona guest kernel: Linux $ver from kernel.org, built reproducibly with [kernel/build.sh](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/kernel/build.sh) from the config and builder image in [kernel/](https://github.com/$GITHUB_REPOSITORY/tree/$GITHUB_SHA/kernel). The effective config is attached. Install it with \`kona kernel install\`, which checks it against the sha256 pinned in versions.env. See [docs/kernel.md](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/docs/kernel.md)." \
+            --notes "The kona guest kernel: Linux $ver from kernel.org, built reproducibly with [kernel/build.sh](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/kernel/build.sh) from the config and builder image in [kernel/](https://github.com/$GITHUB_REPOSITORY/tree/$GITHUB_SHA/kernel). The effective config is attached. Install it with \`kona kernel install\`, which checks it against the sha256 pinned in versions.env. See [docs/design/kernel.md](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/docs/design/kernel.md)." \
             "kernel/out/vmlinux-$ver-kona" \
             "kernel/out/vmlinux-$ver-kona.sha256" \
             "kernel/out/config-$ver-kona"

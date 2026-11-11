@@ -1,5 +1,8 @@
-# Quick start
-
+---
+title: "Quick start"
+linkTitle: "Quick start"
+weight: 2
+---
 This walks through one cluster from creation to deletion. It assumes
 [Installation](installation.md) is done and `kona doctor` passes.
 
@@ -63,7 +66,7 @@ kubectl create deployment myapp --image=myapp:dev
 ```
 
 Pods pull `myapp:dev` from the cluster's own registry. See
-[Loading images](../registry.md).
+[Loading images](../guide/registry.md).
 
 ## Look around
 
@@ -86,7 +89,7 @@ kona start cluster
 
 `stop` keeps VMs, disks and state. After a Mac reboot the VMs are stopped,
 and `kona start cluster` brings them back. It returns once the cluster is
-healthy again. See [Stop, start, verify](../lifecycle.md).
+healthy again. See [Stop, start, verify](../guide/lifecycle.md).
 
 ## Delete it
 

@@ -31,6 +31,9 @@ jobs:
         run: |
           for mod in $(git ls-files 'go.mod' '**/go.mod'); do
             dir=$(dirname "$mod")
+            # website/go.mod only pins the docs theme (a Hugo module): no Go
+            # code, and `go vet` fails on a module with no packages.
+            git ls-files "$dir/*.go" | grep -q . || continue
             echo "::group::$dir"
             (cd "$dir" && go vet ./... && go test ./...)
             echo "::endgroup::"

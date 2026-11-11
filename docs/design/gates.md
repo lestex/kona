@@ -1,5 +1,9 @@
-# Gates
-
+---
+title: "Gates"
+linkTitle: "Gates"
+weight: 4
+aliases: ["/gates/"]
+---
 Every block below is verbatim output from a real run. Sources are the files under `spikes/`, which the scripts next to them regenerate.
 
 ## Phase 0: feasibility spikes
@@ -1030,10 +1034,10 @@ kona-ok
 ### 3.6 Lifecycle with a GPU node: PASS
 
 Stop and start of the whole cluster and of the GPU node alone, with
-`kona verify cluster` before and after: [lifecycle.md](lifecycle.md).
+`kona verify cluster` before and after: [lifecycle.md](../guide/lifecycle.md).
 
 ### 3.7 Host sleep: open
 
-See [failure-modes.md](failure-modes.md). Not re-tested since the test-isolation
+See [failure-modes.md](../reference/failure-modes.md). Not re-tested since the test-isolation
 fix (`357961b`), which explained at least one GPU VM death that had looked
 like a sleep loss.

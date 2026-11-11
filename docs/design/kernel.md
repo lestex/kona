@@ -1,5 +1,9 @@
-# kona guest kernel (Apple `container` nodes)
-
+---
+title: "kona guest kernel (Apple `container` nodes)"
+linkTitle: "Guest kernel"
+weight: 2
+aliases: ["/kernel/"]
+---
 ## What and why
 
 Apple `container`'s default kernel (on this host: 6.18.35 from Kata 3.32.0,

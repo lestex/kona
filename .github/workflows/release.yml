@@ -3,7 +3,7 @@
 # same cliff.toml that writes CHANGELOG.md.
 #
 # The tag is the trigger and the source of the version; nothing is
-# committed anywhere to forget to bump. See docs/release.md.
+# committed anywhere to forget to bump. See docs/development/release.md.
 name: release
 
 on:

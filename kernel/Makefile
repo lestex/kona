@@ -6,7 +6,7 @@ IMAGE   := kona-kernel-builder:$(KERNEL_VERSION)
 TARBALL := out/linux-$(KERNEL_VERSION).tar.xz
 MAJOR   := $(firstword $(subst ., ,$(KERNEL_VERSION)))
 # The vmnet gateway DNS forwarder is not reliable on every host (see
-# docs/failure-modes.md), so pass the host's primary resolver explicitly.
+# docs/reference/failure-modes.md), so pass the host's primary resolver explicitly.
 DNS     ?= $(shell scutil --dns | awk '/nameserver\[[0-9]+\]/ && $$3 ~ /^[0-9.]+$$/ {print $$3; exit}')
 
 # CI builds with docker on an arm64 Linux runner by overriding these

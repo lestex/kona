@@ -1,5 +1,5 @@
 // Package kubeadm bootstraps clusters with upstream kubeadm on systemd node
-// images (opt-in distro: closest to production layout; see docs/distros.md).
+// images (opt-in distro: closest to production layout; see docs/guide/distros.md).
 package kubeadm
 
 import (

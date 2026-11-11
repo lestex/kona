@@ -1,5 +1,9 @@
-# Loading images: kona-registry
-
+---
+title: "Loading images: kona-registry"
+linkTitle: "Loading images"
+weight: 4
+aliases: ["/registry/"]
+---
 ```
 kona load image IMAGE... [--name NAME]
 ```
