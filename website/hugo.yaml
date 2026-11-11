@@ -1,0 +1,67 @@
+# The kona documentation site: Hugo with the Hextra theme, both Go, no
+# Node or Python. The Markdown lives in ../docs, next to the code that
+# links to it; this folder only holds the site's configuration.
+#
+#   make docs-serve    # http://localhost:1313/kona/ with live reload
+#   make docs-build    # what CI builds, into website/public
+baseURL: https://alarin.dev/kona/
+title: kona
+locale: en
+enableGitInfo: true
+
+module:
+  imports:
+    - path: github.com/imfing/hextra
+  mounts:
+    - source: ../docs
+      target: content
+    - source: static
+      target: static
+
+markup:
+  goldmark:
+    renderer:
+      # The design docs embed raw HTML in a few tables.
+      unsafe: true
+  highlight:
+    noClasses: false
+
+# Hextra uses the page's directory as the section, so the folders in
+# docs/ are the sidebar groups; `weight` in front matter orders them.
+menu:
+  main:
+    - name: Docs
+      pageRef: /getting-started/installation
+      weight: 1
+    - name: Search
+      weight: 2
+      params:
+        type: search
+    - name: GitHub
+      weight: 3
+      url: https://github.com/lestex/kona
+      params:
+        icon: github
+
+params:
+  description: Kubernetes on Apple silicon, one Apple container VM per node.
+  navbar:
+    displayTitle: true
+    displayLogo: false
+  page:
+    width: wide
+  theme:
+    default: system
+    displayToggle: true
+  footer:
+    displayCopyright: false
+    displayPoweredBy: false
+  editURL:
+    enable: true
+    base: https://github.com/lestex/kona/edit/main/docs
+  search:
+    enable: true
+    type: flexsearch
+    flexsearch:
+      index: content
+  displayUpdatedDate: true
